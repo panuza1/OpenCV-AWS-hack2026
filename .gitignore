@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.env
+.env.*
+!.env.example
+.aws/
+*.pem
+*.key
+*.p12
+*.zip
+*.tmp
+.DS_Store
+
+# Reproducible generated artifacts.
+examples/generated/
+outputs/
+dist/
+
+# Local planning scratch file superseded by MASTER_PLAN.md.
+note.pd
+
