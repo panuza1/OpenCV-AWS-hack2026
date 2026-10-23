@@ -2,9 +2,9 @@
 
 ## Current phase
 
-**Phase 6 — COMPLETE / PASS: trustworthy ROI-initialized real-ball tracking validated** (2026-10-23, Asia/Bangkok)
+**Phase 7 — RELEASE MATERIALS READY / BLOCKED on manual demo video and Devpost submission** (2026-10-23, Asia/Bangkok)
 
-Three permitted Pexels videos were tested end to end. The unchanged HSV path remains the synthetic default; a small ROI template mode now uses target appearance, local motion/size continuity, and confidence rejection. Independent annotations show trustworthy target identity in all three clips, while the physics results retain perspective, hand-contact, reflection, and annotation limitations. Full evidence is in `docs/REAL_VIDEO_VALIDATION.md`.
+The repository, technical report, architecture, reproducibility instructions, evaluation evidence, official-requirements checklist, and timed demo script are ready. Final local and real AWS verification pass. Phase 7 cannot satisfy its final acceptance gate until the entrant records and verifies a <=5-minute judge-accessible video, confirms repository access/live screen-share details, submits through Devpost, and verifies the resulting project URL.
 
 ## Completed tasks
 
@@ -63,6 +63,12 @@ Three permitted Pexels videos were tested end to end. The unchanged HSV path rem
 - Added a reproducible strict walk-forward real-video validator with causal audit rows, four-model metrics, adaptive gains/regressions, tracking latency, confidence, failure statuses, and JSON export.
 - Added a 60-second dashboard video limit alongside the existing 100 MB limit and documented the two-path architecture in `docs/ARCHITECTURE.md`.
 - Invoked Lambda with trustworthy basketball ROI observations and verified all four models, three adaptive updates, exact schema parity, and a maximum local/cloud difference of `5.684341886080802e-14`.
+- Reviewed the complete repository and current official Devpost overview/rules on 2026-10-23; documented the 11:45 p.m. PDT header versus 11:59 p.m. body discrepancy and adopted 11:45 p.m. PDT as the conservative deadline.
+- Added `docs/TECHNICAL_REPORT.md` covering users, architecture, OpenCV 5, four models, adaptive math, causality, AWS, synthetic/real evaluation, positive and negative results, security, licenses, limitations, and future work.
+- Added `docs/SUBMISSION_CHECKLIST.md` with official requirement mapping, copy-ready project text, stack, innovations, reproduction commands, special-award non-claims, and explicit manual placeholders.
+- Added a 4:50 `docs/DEMO_SCRIPT.md` with exact preflight commands, dashboard actions, narration, AWS proof, timing, privacy checks, and post-render verification.
+- Finalized the README with the project pitch, architecture, headline measurements, documentation map, AWS summary, and honest submission status.
+- Re-ran the full suite, dependency check, both synthetic tracker flows, seven-scenario benchmark, three-video real validation, Streamlit startup/health smoke test, and a real Lambda parity invocation without changing thresholds.
 
 ## Verified environment
 
@@ -333,6 +339,52 @@ ok
 
 The fresh virtual environment was created with Python 3.10.12 and installed only `requirements.txt` plus `requirements-dev.txt`; OpenCV reported `5.0.0` before the full suite ran.
 
+Phase 7 final verification:
+
+```text
+$ env -u PYTHONPATH .venv/bin/python -m pytest -q
+..............................................                           [100%]
+46 passed in 12.70s
+
+$ env -u PYTHONPATH .venv/bin/python -m pip check
+No broken requirements found.
+
+$ env -u PYTHONPATH .venv/bin/python scripts/generate_sample.py
+constant_speed: mp4v, 30 FPS, 150 frames
+slowing_down: mp4v, 30 FPS, 150 frames
+
+$ env -u PYTHONPATH .venv/bin/python scripts/analyze_video.py --video <sample>
+constant_speed: 150/150 valid frames
+slowing_down: 150/150 valid frames
+
+$ env -u PYTHONPATH .venv/bin/python scripts/run_benchmark.py
+phase3_acceptance=PASS; scenarios=7; prediction_rows=924
+adaptive_improvement_vs_frozen_pct=83.10609105966913
+
+$ env -u PYTHONPATH .venv/bin/python scripts/validate_real_videos.py
+acceptance: required=2; passing=3; passed=true
+
+$ env -u PYTHONPATH .venv/bin/streamlit run app.py --server.headless true --server.port 8503
+Uvicorn server started on :::8503
+$ curl --fail http://localhost:8503/_stcore/health
+ok
+```
+
+Final real AWS verification with `AWS_PROFILE=physicseye-cli`, `AWS_REGION=ap-southeast-1`, basketball observations through `4.8 s`, and horizons `[0.4, 0.8]`:
+
+```text
+Identity: arn:aws:iam::502657994526:user/physicseye-cli
+Function/state/runtime: physicseye-predict / Active / python3.13
+UTC: 2026-10-23T08:14:07.304420+00:00
+AWS request ID: 0eb148be-b607-46d2-b6b1-ac4b807bd318
+Invocation / Lambda / billed duration: 462.982544 ms / 12.25 ms / 101 ms
+Local prediction latency: 0.455775 ms
+Models / adaptive updates: 4 / 3
+Parity tolerance / maximum difference: 1e-9 / 5.684341886080802e-14
+Schema mismatches: 0
+Result: PASS
+```
+
 ## Known issues
 
 - This host exports a ROS `PYTHONPATH`, which exposes unrelated ROS packages even inside a normal virtual environment. Verification commands used `env -u PYTHONPATH`; the README documents this host-specific workaround.
@@ -353,8 +405,10 @@ The fresh virtual environment was created with Python 3.10.12 and installed only
 - The deployed Lambda function, execution role, and CloudWatch log group are AWS resources that may incur charges until removed with the documented cleanup commands. They were intentionally left deployed for the dashboard and competition demonstration.
 - The recorded `429.531348 ms` invocation and `106 ms` billed duration include a cold start and are one measurement, not a latency benchmark.
 - `LogType=Tail` allows the client to parse Lambda duration when present, but AWS documents that returning log tails can add to synchronous response latency.
+- No final demo video, public/unlisted video URL, arranged live screen-share details, or verified Devpost project URL exists yet. These require the entrant's recording and signed-in Devpost account.
+- Devpost currently displays 11:45 p.m. PDT in the header/rules while overview prose says 11:59 p.m.; the release checklist uses 11:45 p.m. PDT as the conservative deadline.
 
 ## Next action
 
-Phase 6 is complete. Phase 7 is the next planned phase but has not been started; begin it only on explicit request.
+Record and verify the <=5-minute video, confirm judge access to the repository, arrange the live screen-share path, complete the Devpost form, submit before the conservative deadline, and verify the resulting project URL. Do not mark Phase 7 PASS until these manual steps are complete.
 

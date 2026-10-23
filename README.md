@@ -2,6 +2,39 @@
 
 PhysicsEye turns fixed-camera ball video into measured trajectories, causal physics forecasts, and reproducible benchmark results. It compares constant-velocity, refitted-deceleration, frozen-parameter, and adaptive-deceleration models locally or through a private AWS Lambda function.
 
+The core idea is simple: **predict first, observe the outcome later, measure the error, then update the next prediction**. Every adaptive update is timestamped, bounded, and reconstructable; future observations are rejected from earlier prediction requests.
+
+## What the MVP demonstrates
+
+- OpenCV 5 orange-HSV tracking for deterministic samples and user-initialized ROI template tracking for real balls.
+- Four CPU-friendly trajectory models using identical causal observation histories.
+- A persistent effective-deceleration estimate learned from earlier forecast residuals.
+- A five-tab Streamlit dashboard with tracking status, overlays, model errors, adaptive traces, benchmark results, and exports.
+- The same pure-Python physics engine running locally and in a private AWS Lambda, with numerical parity checks.
+- Reproducible synthetic benchmarks and independently sourced real-video validation, including negative results.
+
+```mermaid
+flowchart LR
+    V[Video] --> O[Local OpenCV 5 tracking]
+    O --> C[Causal observation cutoff]
+    C --> L[Local physics]
+    C --> A[Private AWS Lambda]
+    L --> F[Four forecasts + adaptive trace]
+    A --> F
+    F --> D[Streamlit overlays, metrics, CSV/JSON]
+```
+
+Detailed design: [technical report](docs/TECHNICAL_REPORT.md) · [architecture](docs/ARCHITECTURE.md) · [evaluation](docs/EVALUATION.md) · [real-video validation](docs/REAL_VIDEO_VALIDATION.md)
+
+## Verified headline results
+
+- Held-out abrupt-change synthetic case: adaptive MAE `0.044910 px` versus frozen `0.265838 px`, an `83.106%` reduction over seven targets.
+- Seven-scenario aggregate MAE: constant velocity `1.329688 px`, refitted `1.306162 px`, frozen `1.496590 px`, adaptive `1.358028 px`. Adaptive is not the aggregate winner.
+- Real ROI reference checks: 31/31 visible references on-ball and 0/3 absent-target false positives across basketball, billiards, and disco-ball clips; center uncertainty is ±8–25 px.
+- Real basketball Lambda replay: four models, three adaptive updates, maximum local/cloud difference `5.684e-14` at tolerance `1e-9`.
+
+Synthetic results do not establish real-world accuracy. Real results remain image-space measurements affected by perspective, hand impulses, reflections, tracker error, and sparse manual annotations.
+
 ## Quick start
 
 Python 3.10 was used for the verified setup on Linux x86_64.
@@ -66,7 +99,7 @@ See [real-video validation](docs/REAL_VIDEO_VALIDATION.md) for sources, license 
 env -u PYTHONPATH .venv/bin/python scripts/validate_real_videos.py
 ```
 
-## Run the Phase 4 dashboard
+## Run the dashboard
 
 From the repository root:
 
@@ -89,4 +122,21 @@ The default detector expects one orange ball, a dark or plain background, a fixe
 ROI mode supports other appearances without a neural model. Select a tight ball box on a clear frame. It uses normalized grayscale template matching at five nearby scales, local motion continuity, size limits, and a confidence gate. It does not fabricate positions during a failed match. It assumes a roughly fixed camera and can still fail under long occlusion, extreme scale/appearance change, or a similar nearby object.
 
 If your shell exports a ROS `PYTHONPATH`, prefix the Python and pytest commands with `env -u PYTHONPATH` to keep the virtual environment isolated.
+
+## AWS deployment
+
+AWS mode uses a private Lambda and the standard boto3 credential chain. Video remains local; only timestamped observations through the cutoff are sent. The handler validates schema and request limits, and the dashboard displays errors without silently substituting local output.
+
+Follow [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) for least-privilege setup, packaging, invocation, parity verification, and cleanup. Cloud resources may incur charges until removed.
+
+## Submission and documentation
+
+- [Technical report](docs/TECHNICAL_REPORT.md)
+- [Submission checklist and Devpost copy](docs/SUBMISSION_CHECKLIST.md)
+- [Maximum-five-minute demo script](docs/DEMO_SCRIPT.md)
+- [AWS deployment](docs/AWS_DEPLOYMENT.md)
+- [Synthetic evaluation](docs/EVALUATION.md)
+- [Real-video validation and licensed-source instructions](docs/REAL_VIDEO_VALIDATION.md)
+
+The repository prepares the technical submission materials but does not claim that a demo video has been recorded or that a Devpost entry has been submitted. Those manual steps are tracked explicitly in the submission checklist.
 
