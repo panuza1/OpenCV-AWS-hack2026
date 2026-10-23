@@ -21,6 +21,7 @@ MODEL_META = {
 }
 ALLOWED_VIDEO_SUFFIXES = {".mp4", ".avi", ".mov"}
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+MAX_VIDEO_DURATION_S = 60.0
 
 
 def validate_video_upload(filename, data):
@@ -34,12 +35,65 @@ def validate_video_upload(filename, data):
     return suffix
 
 
-def track_video_bytes(filename, data):
+def track_video_bytes(filename, data, **tracker_options):
     suffix = validate_video_upload(filename, data)
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / f"upload{suffix}"
         path.write_bytes(data)
-        return track_video(path)
+        _video_metadata(path)
+        return track_video(path, **tracker_options)
+
+
+def _video_metadata(path):
+    capture = cv2.VideoCapture(str(path))
+    try:
+        if not capture.isOpened():
+            raise ValueError("Could not open the uploaded video")
+        width = round(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        frame_count = round(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = float(capture.get(cv2.CAP_PROP_FPS))
+    finally:
+        capture.release()
+    if width <= 0 or height <= 0 or frame_count <= 0 or not math.isfinite(fps) or fps <= 0:
+        raise ValueError("Video metadata is incomplete")
+    duration_s = frame_count / fps
+    if duration_s > MAX_VIDEO_DURATION_S:
+        raise ValueError(f"Video exceeds the {MAX_VIDEO_DURATION_S:g}-second limit")
+    return {
+        "width": width, "height": height, "frame_count": frame_count,
+        "fps": fps, "duration_s": duration_s,
+    }
+
+
+def video_metadata_bytes(filename, data):
+    suffix = validate_video_upload(filename, data)
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / f"video{suffix}"
+        path.write_bytes(data)
+        return _video_metadata(path)
+
+
+def render_roi_preview_bytes(filename, data, frame_index, roi):
+    suffix = validate_video_upload(filename, data)
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / f"video{suffix}"
+        path.write_bytes(data)
+        capture = cv2.VideoCapture(str(path))
+        try:
+            capture.set(cv2.CAP_PROP_POS_FRAMES, int(frame_index))
+            readable, frame = capture.read()
+        finally:
+            capture.release()
+    if not readable:
+        raise ValueError(f"Could not decode initialization frame {frame_index}")
+    x, y, width, height = (round(value) for value in roi)
+    if width < 8 or height < 8 or x < 0 or y < 0 or x + width > frame.shape[1] or y + height > frame.shape[0]:
+        raise ValueError("ROI must stay inside the initialization frame")
+    cv2.rectangle(frame, (x, y), (x + width, y + height), (0, 255, 0), max(2, frame.shape[1] // 500))
+    cv2.putText(frame, "selected target", (x, max(24, y - 10)), cv2.FONT_HERSHEY_SIMPLEX,
+                max(0.5, frame.shape[1] / 2500), (0, 255, 0), max(1, frame.shape[1] // 1000), cv2.LINE_AA)
+    return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
 
 def prepare_analysis(observations, cutoff_time_s, horizons_s, prediction_result=None):
@@ -138,6 +192,23 @@ def render_annotated_frame(video_path, observations, analysis, time_s):
         capture.release()
     if not readable:
         raise ValueError(f"Could not decode the frame at {time_s:.2f} s")
+
+    current = min(
+        observations,
+        key=lambda point: abs(point["time_s"] - time_s),
+        default=None,
+    )
+    if current and "status" in current:
+        if current.get("valid") and current.get("bbox"):
+            x, y, width, height = map(round, current["bbox"])
+            cv2.rectangle(frame, (x, y), (x + width, y + height), (0, 255, 0), 3)
+            tracking_text = f'{current["status"]} confidence={current["confidence"]:.2f}'
+            color = (0, 255, 0)
+        else:
+            tracking_text = f'tracking invalid: {current["status"]}'
+            color = (0, 0, 255)
+        cv2.putText(frame, tracking_text, (10, 48), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55, color, 1, cv2.LINE_AA)
 
     cutoff = analysis["cutoff_time_s"]
     history = [point for point in observations if point["time_s"] <= cutoff and point.get("valid")]

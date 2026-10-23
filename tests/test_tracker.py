@@ -117,3 +117,41 @@ def test_cli_writes_json_and_csv(tmp_path):
     }
     assert (output_dir / "constant_speed.track.csv").is_file()
 
+
+def test_roi_template_tracks_selected_target_and_marks_occlusion_invalid(tmp_path):
+    video = tmp_path / "roi_target.avi"
+    writer = cv2.VideoWriter(
+        str(video), cv2.VideoWriter_fourcc(*"MJPG"), 25.0, (320, 240)
+    )
+    assert writer.isOpened()
+    expected = []
+    for frame_index in range(40):
+        frame = np.full((240, 320, 3), 30, dtype=np.uint8)
+        cv2.circle(frame, (250, 55), 15, (210, 210, 210), -1)
+        cv2.line(frame, (240, 55), (260, 55), (20, 20, 20), 3)
+        center = (60 + 3 * frame_index, 120)
+        if not 18 <= frame_index <= 21:
+            cv2.circle(frame, center, 15, (210, 210, 210), -1)
+            cv2.line(frame, (center[0] - 10, 120), (center[0] + 10, 120), (20, 20, 20), 3)
+            expected.append((frame_index, center))
+        writer.write(frame)
+    writer.release()
+
+    observations = track_video(
+        video, mode="roi_template", initial_frame=0, roi=(43, 103, 34, 34)
+    )
+
+    assert all(not observations[index]["valid"] for index in range(18, 22))
+    errors = [
+        ((observations[index]["x_px"] - center[0]) ** 2
+         + (observations[index]["y_px"] - center[1]) ** 2) ** 0.5
+        for index, center in expected
+        if observations[index]["valid"]
+    ]
+    assert len(errors) >= 32
+    assert sum(errors) / len(errors) <= 3.0
+    assert observations[22]["valid"]
+    assert observations[22]["status"] == "tracked"
+    assert observations[22]["confidence"] >= 0.5
+    assert all(path.is_file() for path in tracker.write_track(observations, tmp_path / "roi"))
+

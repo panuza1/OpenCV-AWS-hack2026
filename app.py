@@ -13,8 +13,10 @@ from physicseye.dashboard import (
     analysis_json,
     load_benchmark,
     prepare_analysis,
+    render_roi_preview_bytes,
     render_video_bytes,
     track_video_bytes,
+    video_metadata_bytes,
 )
 from physicseye.cloud import execute_prediction
 from physicseye.tracker import VideoError
@@ -83,11 +85,44 @@ with overview:
 with video_tab:
     st.subheader("Analyze a video")
     filename, video_bytes = _video_source()
-    if filename and st.button("Analyze", type="primary"):
+    tracking_mode = st.radio(
+        "Tracking mode", ("Orange HSV", "Select target ROI"), horizontal=True
+    )
+    tracker_options = {} if tracking_mode == "Orange HSV" else None
+    if filename and tracking_mode == "Select target ROI":
         try:
-            st.session_state.track = track_video_bytes(filename, video_bytes)
+            metadata = video_metadata_bytes(filename, video_bytes)
+            initial_frame = st.slider(
+                "Initialization frame", 0, metadata["frame_count"] - 1, 0
+            )
+            x_range = st.slider(
+                "Target horizontal range (px)", 0, metadata["width"],
+                (metadata["width"] // 3, 2 * metadata["width"] // 3),
+            )
+            y_range = st.slider(
+                "Target vertical range (px)", 0, metadata["height"],
+                (metadata["height"] // 3, 2 * metadata["height"] // 3),
+            )
+            roi = (x_range[0], y_range[0], x_range[1] - x_range[0], y_range[1] - y_range[0])
+            st.image(
+                render_roi_preview_bytes(filename, video_bytes, initial_frame, roi),
+                caption=f"Selected target on frame {initial_frame}",
+            )
+            tracker_options = {
+                "mode": "roi_template", "initial_frame": initial_frame, "roi": roi
+            }
+            st.caption("Adjust both ranges until the green box tightly surrounds only the ball.")
+        except ValueError as error:
+            st.error(str(error))
+    if filename and tracker_options is not None and st.button("Analyze", type="primary"):
+        try:
+            st.session_state.track = track_video_bytes(
+                filename, video_bytes, **tracker_options
+            )
             st.session_state.video_name = filename
             st.session_state.video_bytes = video_bytes
+            st.session_state.tracking_mode = tracking_mode
+            st.session_state.tracking_roi = tracker_options.get("roi")
             st.session_state.pop("analysis", None)
             st.session_state.pop("prediction_execution", None)
             st.session_state.pop("prediction_execution_key", None)
@@ -101,10 +136,36 @@ with video_tab:
         col1.metric("Frames", len(observations))
         col2.metric("Valid tracked positions", valid_count)
         col3.metric("Duration", f"{duration:.2f} s")
+        confidence_rows = [point for point in observations if point.get("valid") and "confidence" in point]
+        if confidence_rows:
+            failures = [
+                point for point in observations
+                if not point["valid"] and point.get("status") != "before_initialization"
+            ]
+            st.caption(
+                f'ROI template tracking: mean confidence '
+                f'{sum(point["confidence"] for point in confidence_rows) / len(confidence_rows):.3f}; '
+                f'{len(failures)} invalid frames. Invalid frames have no fabricated position.'
+            )
+            if failures:
+                reasons = sorted({point["status"] for point in failures})
+                st.warning(f'Tracking failures: {", ".join(reasons)}')
         if valid_count < 4:
             st.error("Too few valid tracked positions for physics prediction.")
         else:
             cutoff = st.slider("Prediction cutoff (s)", 0.75, max(0.75, duration), min(2.0, duration), 0.05)
+            cutoff_observation = min(
+                observations, key=lambda point: abs(point["time_s"] - cutoff)
+            )
+            if "status" in cutoff_observation:
+                if cutoff_observation["valid"]:
+                    st.success(
+                        f'Tracked position at cutoff: '
+                        f'({cutoff_observation["x_px"]:.1f}, {cutoff_observation["y_px"]:.1f}) px; '
+                        f'confidence {cutoff_observation["confidence"]:.3f}'
+                    )
+                else:
+                    st.error(f'Tracking is invalid at this cutoff: {cutoff_observation["status"]}')
             horizons = st.multiselect("Prediction horizons (s)", (0.25, 0.5, 1.0), default=(0.25, 0.5, 1.0))
             if not horizons:
                 st.warning("Select at least one prediction horizon.")

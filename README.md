@@ -1,6 +1,6 @@
 # PhysicsEye
 
-PhysicsEye turns fixed-camera video of an orange rolling ball into measured trajectories, causal physics forecasts, and reproducible benchmark results. It compares constant-velocity, refitted-deceleration, frozen-parameter, and adaptive-deceleration models locally or through a private AWS Lambda function.
+PhysicsEye turns fixed-camera ball video into measured trajectories, causal physics forecasts, and reproducible benchmark results. It compares constant-velocity, refitted-deceleration, frozen-parameter, and adaptive-deceleration models locally or through a private AWS Lambda function.
 
 ## Quick start
 
@@ -58,9 +58,13 @@ The bundled videos are synthetic fixtures. Their tracker measurements are evalua
 
 ## Phase 6 real-video validation
 
-Three permitted Pexels clips were downloaded through their official free-download redirects and tested without changing the detector. The basketball produced 40.1% raw coverage on floor features, the white billiard ball produced no detections, and the disco clip produced 100% coverage of a hanging cord. A 32-frame manual spot check found zero on-ball detections, so tracker-relative forecast errors are documented only as pipeline diagnostics.
+Three permitted Pexels clips exposed the original HSV detector's failure: 0/32 manually checked positions were on the ball. A user-selected ROI template mode now tracks appearance within a motion- and size-constrained local search and emits invalid observations when confidence is insufficient. On 34 independent visible/absent reference frames, all three clips achieved 100% annotated on-ball rate, zero annotated false positives, and center MAE of 16.121 px (basketball), 18.143 px (billiards), and 3.681 px (disco). These sparse checks validate target identity, not subpixel or calibrated physical accuracy.
 
-See [real-video validation](docs/REAL_VIDEO_VALIDATION.md) for sources, license restrictions, authorized download commands, media hashes, scene inspection, all four model results, the manual checks, and real Lambda parity evidence. Downloaded originals remain under the Git-ignored `examples/real/` directory.
+See [real-video validation](docs/REAL_VIDEO_VALIDATION.md) for sources, license restrictions, authorized download commands, before/after metrics, all four causal model results, annotation uncertainty, and real Lambda parity evidence. Downloaded originals remain under the Git-ignored `examples/real/` directory. After downloading them, reproduce the measurement with:
+
+```bash
+env -u PYTHONPATH .venv/bin/python scripts/validate_real_videos.py
+```
 
 ## Run the Phase 4 dashboard
 
@@ -70,17 +74,19 @@ From the repository root:
 env -u PYTHONPATH .venv/bin/streamlit run app.py
 ```
 
-The Streamlit dashboard can analyze either bundled sample or an uploaded MP4, AVI, or MOV file up to 100 MB. It shows OpenCV 5 tracked history, forecasts from all four Phase 2 models, later tracker observations labeled as evaluation-only, pixel-space errors, model parameters, chronological adaptive updates and skipped-update reasons. Analysis can be downloaded as JSON or CSV.
+The Streamlit dashboard can analyze either bundled sample or an uploaded MP4, AVI, or MOV file up to 100 MB and 60 seconds. **Orange HSV** preserves the generated-sample path. **Select target ROI** lets a user choose an initialization frame and box around another ball; the preview, box, confidence/status, invalid-frame warnings, tracked position, and predictions use actual tracker output. It shows forecasts from all four Phase 2 models, later tracker observations labeled as evaluation-only, pixel-space errors, model parameters, chronological adaptive updates and skipped-update reasons. Analysis can be downloaded as JSON or CSV.
 
 The Benchmark Results tab reads the existing Phase 3 artifact at `outputs/evaluation.json`; run `env -u PYTHONPATH .venv/bin/python scripts/run_benchmark.py` if it is missing. The dashboard reports regressions as well as improvements and does not claim that adaptive prediction is always best.
 
 `LOCAL` is the default execution mode. `AWS` keeps OpenCV tracking local and sends only the causal observation prefix to the configured Lambda. It has no silent fallback and displays local/cloud parity and real invocation metadata. See [AWS deployment](docs/AWS_DEPLOYMENT.md) for the request contract, least-privilege IAM setup, deployment, invocation, evidence, and cleanup commands. Cloud deployment and verification require explicit authorization and valid AWS credentials.
 
-Predictions remain causal: the selected cutoff determines the observation prefix sent to the physics engine. Later tracker points are joined only after prediction for evaluation and are visually labeled. Pixel-space measurements are not calibrated physical units. Independently sourced real-video validation currently fails at perception, so real-world adaptive performance remains unverified.
+Predictions remain causal: the selected cutoff determines the observation prefix sent to the physics engine. Later tracker points are joined only after prediction for evaluation and are visually labeled. Pixel-space measurements are not calibrated physical units. The real clips include perspective, hand impulses, occlusion, and reflections; their numerical adaptive gains do not establish calibrated physical accuracy.
 
 ## Tracking constraints
 
-The detector expects one orange ball, a dark or plain background, a fixed camera, even lighting, and little occlusion. It thresholds HSV values from `(5, 100, 100)` through `(25, 255, 255)`, removes small mask noise with 5x5 morphological operations, accepts contour areas from 100 pixels² through 10% of the frame, and rejects center jumps over 50 pixels per elapsed frame. These values target the provided samples and are not generalized object recognition.
+The default detector expects one orange ball, a dark or plain background, a fixed camera, even lighting, and little occlusion. It thresholds HSV values from `(5, 100, 100)` through `(25, 255, 255)`, removes small mask noise with 5x5 morphological operations, accepts contour areas from 100 pixels² through 10% of the frame, and rejects center jumps over 50 pixels per elapsed frame.
+
+ROI mode supports other appearances without a neural model. Select a tight ball box on a clear frame. It uses normalized grayscale template matching at five nearby scales, local motion continuity, size limits, and a confidence gate. It does not fabricate positions during a failed match. It assumes a roughly fixed camera and can still fail under long occlusion, extreme scale/appearance change, or a similar nearby object.
 
 If your shell exports a ROS `PYTHONPATH`, prefix the Python and pytest commands with `env -u PYTHONPATH` to keep the virtual environment isolated.
 

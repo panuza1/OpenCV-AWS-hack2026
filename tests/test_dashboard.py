@@ -1,6 +1,8 @@
 import copy
 import json
 
+import cv2
+import numpy as np
 import pytest
 
 from physicseye.dashboard import (
@@ -8,8 +10,10 @@ from physicseye.dashboard import (
     load_benchmark,
     prepare_analysis,
     render_annotated_frame,
+    render_roi_preview_bytes,
     track_video_bytes,
     validate_video_upload,
+    video_metadata_bytes,
 )
 from physicseye.tracker import track_video
 
@@ -45,6 +49,38 @@ def test_upload_validation_and_tracking_integration():
         validate_video_upload("unsafe.txt", data)
     with pytest.raises(ValueError, match="empty"):
         validate_video_upload("empty.mp4", b"")
+
+
+def test_roi_preview_and_tracking_integration():
+    data = open(SAMPLE, "rb").read()
+    metadata = video_metadata_bytes("slowing_down.mp4", data)
+    assert metadata == {
+        "width": 320, "height": 240, "frame_count": 150,
+        "fps": 30.0, "duration_s": 5.0,
+    }
+    preview = render_roi_preview_bytes("slowing_down.mp4", data, 0, (27, 107, 26, 26))
+    assert preview.shape == (240, 320, 3)
+
+    observations = track_video_bytes(
+        "slowing_down.mp4", data, mode="roi_template",
+        initial_frame=0, roi=(27, 107, 26, 26),
+    )
+    assert len(observations) == 150
+    assert sum(point["valid"] for point in observations) >= 145
+    assert all("confidence" in point and "status" in point for point in observations)
+
+
+def test_upload_duration_limit(tmp_path):
+    video = tmp_path / "long.avi"
+    writer = cv2.VideoWriter(
+        str(video), cv2.VideoWriter_fourcc(*"MJPG"), 1.0, (64, 64)
+    )
+    assert writer.isOpened()
+    for _ in range(61):
+        writer.write(np.zeros((64, 64, 3), dtype=np.uint8))
+    writer.release()
+    with pytest.raises(ValueError, match="60-second limit"):
+        track_video_bytes("long.avi", video.read_bytes())
 
 
 def test_benchmark_loading_and_missing_file(tmp_path):

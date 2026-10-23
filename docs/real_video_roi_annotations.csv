@@ -1,0 +1,35 @@
+video,frame,time_s,ball_visible,x_px,y_px,radius_px,uncertainty_px,method
+basketball_6077402,80,3.20,true,1391.1,335.4,209.6,8,circle edge overlay manually reviewed
+basketball_6077402,90,3.60,true,1349.8,449.1,229.2,8,circle edge overlay manually reviewed
+basketball_6077402,100,4.00,true,1302.3,585.2,252.4,8,circle edge overlay manually reviewed
+basketball_6077402,110,4.40,true,1234.5,749.1,280.0,8,circle edge overlay manually reviewed
+basketball_6077402,120,4.80,true,1158.8,955.0,311.4,8,circle edge overlay manually reviewed
+basketball_6077402,130,5.20,true,1077.0,1193.9,351.2,8,circle edge overlay manually reviewed
+basketball_6077402,140,5.60,true,977.5,1486.3,404.1,8,circle edge overlay manually reviewed
+basketball_6077402,170,6.80,false,,,,,ball has left the frame
+basketball_6077402,180,7.20,false,,,,,ball has left the frame
+basketball_6077402,190,7.60,false,,,,,ball has left the frame
+billiards_6254504,0,0.00,true,896.1,1658.9,116.8,12,circle edge overlay manually reviewed
+billiards_6254504,29,1.16,true,1550.2,1697.2,118.1,12,circle edge overlay manually reviewed
+billiards_6254504,58,2.32,true,2875.1,1734.2,116.7,12,circle edge overlay manually reviewed
+billiards_6254504,87,3.48,true,1426.6,1665.7,114.4,12,circle edge overlay manually reviewed
+billiards_6254504,117,4.68,true,1298.7,1710.4,104.1,12,circle edge overlay manually reviewed
+billiards_6254504,146,5.84,true,2738.0,1914.0,142.0,25,partially occluded ball outline manually marked
+billiards_6254504,175,7.00,true,1142.0,1750.0,150.0,25,partially occluded ball outline manually marked
+billiards_6254504,204,8.16,true,1092.0,1708.0,140.0,25,ball outline manually marked
+billiards_6254504,234,9.36,true,2375.1,1845.3,75.2,12,circle edge overlay manually reviewed
+billiards_6254504,263,10.52,true,1313.2,1672.1,84.1,12,circle edge overlay manually reviewed
+billiards_6254504,292,11.68,true,1673.2,1696.6,107.1,12,circle edge overlay manually reviewed
+billiards_6254504,321,12.84,true,2839.1,1788.9,86.9,12,circle edge overlay manually reviewed
+disco_5751090,0,0.00,true,2450.0,1070.0,550.0,25,sphere outline manually marked
+disco_5751090,15,0.60,true,2550.0,1070.0,550.0,25,sphere outline manually marked
+disco_5751090,31,1.24,true,2625.0,1060.0,550.0,25,sphere outline manually marked
+disco_5751090,46,1.84,true,2730.0,1060.0,550.0,25,sphere outline manually marked
+disco_5751090,61,2.44,true,2800.0,1060.0,550.0,25,sphere outline manually marked
+disco_5751090,77,3.08,true,2800.0,1060.0,550.0,25,sphere outline manually marked
+disco_5751090,92,3.68,true,2790.0,1060.0,550.0,25,sphere outline manually marked
+disco_5751090,108,4.32,true,2790.0,1060.0,550.0,25,sphere outline manually marked
+disco_5751090,123,4.92,true,2795.0,1060.0,550.0,25,sphere outline manually marked
+disco_5751090,139,5.56,true,2790.0,1055.0,550.0,25,sphere outline manually marked
+disco_5751090,154,6.16,true,2795.0,1055.0,550.0,25,sphere outline manually marked
+disco_5751090,170,6.80,true,2790.0,1055.0,550.0,25,sphere outline manually marked
