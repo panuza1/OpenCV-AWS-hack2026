@@ -12,6 +12,7 @@ __pycache__/
 *.zip
 *.tmp
 .DS_Store
+/aws/
 
 # Reproducible generated artifacts.
 examples/generated/

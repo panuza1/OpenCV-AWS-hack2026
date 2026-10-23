@@ -2,9 +2,9 @@
 
 ## Current phase
 
-**Phase 5 — BLOCKED: offline implementation complete, real AWS verification pending** (2026-10-22, Asia/Bangkok)
+**Phase 5 — COMPLETE: AWS Lambda integration deployed and verified** (2026-10-23, Asia/Bangkok)
 
-The Lambda handler, deployment package, direct invocation client, dashboard AWS mode, parity checks, tests, and deployment documentation are complete. The host has no AWS CLI, configured AWS/PhysicsEye environment, deployment authorization, or recorded cloud invocation, so Phase 5 cannot pass its real-AWS acceptance gate yet.
+The Lambda handler, deployment package, direct invocation client, dashboard AWS mode, parity checks, tests, deployment documentation, and real AWS verification are complete. The private `physicseye-predict` function is active in `ap-southeast-1` and returned all four models with local/cloud parity inside the declared `1e-9` tolerance.
 
 ## Completed tasks
 
@@ -47,6 +47,8 @@ The Lambda handler, deployment package, direct invocation client, dashboard AWS 
 - Added a reproducible 8 KB ZIP packager/deployer containing only the Lambda handler and shared standard-library physics module; OpenCV and NumPy are not packaged.
 - Added least-privilege IAM, deployment, invocation, evidence, and cleanup instructions in `docs/AWS_DEPLOYMENT.md` based on current official AWS documentation.
 - Added Phase 5 tests for valid/malformed events, schema compatibility, causal rejection, missing/irregular observations, mocked invocation parity and timing metadata, errors without fallback, and package contents.
+- Deployed the dedicated `physicseye-lambda-role` execution role with `AWSLambdaBasicExecutionRole` and the private `physicseye-predict` Lambda function using Python 3.13, 128 MB memory, and a 10-second timeout.
+- Invoked the deployed function with the OpenCV slowing-video track, verified all four models and four adaptive updates, and measured local/cloud parity against the shared local engine.
 
 ## Verified environment
 
@@ -57,6 +59,7 @@ The Lambda handler, deployment package, direct invocation client, dashboard AWS 
 - Streamlit: 1.65.0
 - boto3: 1.43.116
 - pytest: 9.1.1
+- AWS CLI: 2.38.4
 - Working video output: `.mp4` with OpenCV fourcc `mp4v`; ffprobe identifies MPEG-4 video, 320x240, 30 FPS, 150 frames
 
 ## Test evidence
@@ -214,16 +217,16 @@ Local URL: http://localhost:8501
 
 The Streamlit headless app test loaded all five tabs with no exception, selected and analyzed each bundled sample, found all 150 tracked positions, and rendered calculated model/learning results. The server startup smoke test succeeded. No graphical browser surface was available in this environment, so visual browser inspection and screenshots were not completed.
 
-Phase 5 offline tests and package smoke test:
+Phase 5 tests, package smoke test, and real AWS verification:
 
 ```text
 $ env -u PYTHONPATH .venv/bin/python -m pytest tests/test_lambda_handler.py -q
 ..........                                                               [100%]
-10 passed in 0.14s
+10 passed in 0.24s
 
 $ env -u PYTHONPATH .venv/bin/python -m pytest -q
 ........................................                                 [100%]
-40 passed in 1.41s
+40 passed in 1.81s
 
 $ env -u PYTHONPATH .venv/bin/python -m pip check
 No broken requirements found.
@@ -238,6 +241,28 @@ physicseye/physics.py
 The packaged handler was imported directly from the ZIP and executed 50 times against the OpenCV slowing-video track at cutoff `2.0 s`: all four models returned, the adaptive trace contained four updates, and measured local handler latency was median `0.299204 ms`, minimum `0.292669 ms`, maximum `0.395071 ms`. These are host-local timings, not AWS measurements.
 
 The mocked boto3 test returned exact local/Lambda parity (`max_absolute_difference=0`) and verified parsing of a synthetic `1.23 ms` Lambda duration. That duration is test fixture data and is not reported as cloud performance. The Streamlit harness also verified LOCAL analysis and a visible AWS missing-configuration error with no fallback.
+
+Real AWS evidence captured with `AWS_PROFILE=physicseye-cli` and `AWS_REGION=ap-southeast-1`:
+
+```text
+IAM identity: arn:aws:iam::502657994526:user/physicseye-cli
+Execution role: arn:aws:iam::502657994526:role/physicseye-lambda-role
+Function: arn:aws:lambda:ap-southeast-1:502657994526:function:physicseye-predict
+Runtime/state: python3.13 / Active
+UTC invocation timestamp: 2026-10-23T06:19:56.617656+00:00
+AWS request ID: 009fd967-62b1-418d-acc3-753664a0148d
+Invocation latency: 429.531348 ms
+Lambda duration: 17.25 ms
+Lambda billed duration: 106 ms
+Local prediction latency: 0.345083 ms
+Adaptive updates: 4
+Parity tolerance: 1e-9
+Maximum absolute difference: 5.3290705182007514e-14
+Schema mismatches: 0
+Result: PASS
+```
+
+This was a real synchronous cold invocation through boto3 using the standard named-profile credential chain. The request contained only 61 causal tracker observations at or before the `2.0 s` cutoff and horizons `[0.25, 0.5, 1.0]`; no video or future observation was sent to Lambda.
 
 ## Known issues
 
@@ -254,11 +279,11 @@ The mocked boto3 test returned exact local/Lambda parity (`max_absolute_differen
 - The dashboard accepts prerecorded uploads only; Phase 4 deliberately excludes webcam streaming.
 - The repository contains no independently recorded real-world video fixture. Both dashboard samples are generated, so real-video robustness and adaptive performance remain unverified.
 - Dashboard actual points are later tracker measurements, not calibrated ground truth. They are used only after forecasts are produced and may contain tracker error.
-- No real Lambda resource was created or invoked. The AWS CLI is absent and no `AWS_REGION` or `PHYSICSEYE_LAMBDA_NAME` is configured on this host; deployment was also explicitly outside the authorization granted for this phase.
-- AWS invocation latency, Lambda execution duration, request ID, and cloud parity remain unmeasured. Mocked latency is test data only.
+- The deployed Lambda function, execution role, and CloudWatch log group are AWS resources that may incur charges until removed with the documented cleanup commands. They were intentionally left deployed for the dashboard and competition demonstration.
+- The recorded `429.531348 ms` invocation and `106 ms` billed duration include a cold start and are one measurement, not a latency benchmark.
 - `LogType=Tail` allows the client to parse Lambda duration when present, but AWS documents that returning log tails can add to synchronous response latency.
 
 ## Next action
 
-Unblock Phase 5 by installing/configuring AWS CLI credentials, explicitly authorizing deployment, running `scripts/deploy_lambda.sh deploy`, and capturing one real dashboard invocation with request ID, timing, adaptive update count, and local/cloud parity. Do not start Phase 6 until Phase 5 has real AWS evidence and is marked complete.
+Phase 5 passes its acceptance criteria. The next planned phase is Phase 6 quality, reproducibility, and measured impact; start it only after explicit authorization.
 
