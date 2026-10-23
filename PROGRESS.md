@@ -2,9 +2,9 @@
 
 ## Current phase
 
-**Phase 5 — COMPLETE: AWS Lambda integration deployed and verified** (2026-10-23, Asia/Bangkok)
+**Phase 6 — BLOCKED: internet-video validation complete; detector unsuitable for supplied clips** (2026-10-23, Asia/Bangkok)
 
-The Lambda handler, deployment package, direct invocation client, dashboard AWS mode, parity checks, tests, deployment documentation, and real AWS verification are complete. The private `physicseye-predict` function is active in `ap-southeast-1` and returned all four models with local/cloud parity inside the declared `1e-9` tolerance.
+Three permitted Pexels videos were downloaded through official free-download redirects and tested end to end. The unchanged orange HSV tracker did not follow the target ball in any clip, so real-ball prediction accuracy and adaptive improvement cannot be measured honestly. The failure evidence, tracker-relative pipeline diagnostics, and real-video local/AWS parity are documented in `docs/REAL_VIDEO_VALIDATION.md`.
 
 ## Completed tasks
 
@@ -49,6 +49,12 @@ The Lambda handler, deployment package, direct invocation client, dashboard AWS 
 - Added Phase 5 tests for valid/malformed events, schema compatibility, causal rejection, missing/irregular observations, mocked invocation parity and timing metadata, errors without fallback, and package contents.
 - Deployed the dedicated `physicseye-lambda-role` execution role with `AWSLambdaBasicExecutionRole` and the private `physicseye-predict` Lambda function using Python 3.13, 128 MB memory, and a 10-second timeout.
 - Invoked the deployed function with the OpenCV slowing-video track, verified all four models and four adaptive updates, and measured local/cloud parity against the shared local engine.
+- Verified three Pexels source pages and the Pexels license, then downloaded their UHD MP4s through the official public download actions into Git-ignored `examples/real/`.
+- Inspected codec, resolution, FPS, duration, file hash, camera stability, lighting, visibility, blur, occlusion, perspective, and target-color compatibility for each real clip.
+- Ran the unchanged OpenCV 5 tracker on 690 real-video frames and recorded raw coverage of 40.10% for basketball, 0% for billiards, and 100% for disco.
+- Manually checked 32 frames and found zero on-ball detections: basketball followed floor features, billiards rejected the white ball, and disco followed a hanging cord.
+- Ran all four predictors at equal causal cutoffs on the basketball and disco tracks, clearly labeling the resulting metrics as wrong-target tracker diagnostics; billiards could not predict because it had zero valid observations.
+- Invoked the real Lambda with the basketball observation stream and verified all four models, exact schema parity, and a maximum local/cloud difference of `1.1368683772161603e-13`.
 
 ## Verified environment
 
@@ -264,6 +270,50 @@ Result: PASS
 
 This was a real synchronous cold invocation through boto3 using the standard named-profile credential chain. The request contained only 61 causal tracker observations at or before the `2.0 s` cutoff and horizons `[0.25, 0.5, 1.0]`; no video or future observation was sent to Lambda.
 
+Phase 6 internet-video validation:
+
+```text
+$ env -u PYTHONPATH .venv/bin/python scripts/analyze_video.py --video examples/real/basketball_6077402.mp4 --output-dir outputs/real
+frames=197 valid_frames=79
+
+$ env -u PYTHONPATH .venv/bin/python scripts/analyze_video.py --video examples/real/billiards_6254504.mp4 --output-dir outputs/real
+frames=322 valid_frames=0
+
+$ env -u PYTHONPATH .venv/bin/python scripts/analyze_video.py --video examples/real/disco_5751090.mp4 --output-dir outputs/real
+frames=171 valid_frames=171
+
+manual spot checks: 32 visible-ball frames; 15 accepted wrong-object detections; 0 on-ball detections
+```
+
+Tracker-relative four-model diagnostics were available for basketball (`n=25` per model) and disco (`n=39` per model). Basketball adaptive MAE was `342.075553 px`, identical to frozen because no eligible updates occurred; disco adaptive MAE was `3.218922 px`, but this predicts a cord rather than a ball. Billiards produced no prediction samples. These are not real-ball accuracy results.
+
+Real-video AWS parity at the basketball `5.0 s` cutoff:
+
+```text
+UTC: 2026-10-23T06:32:30.492919+00:00
+AWS request ID: 5e9b648a-1e66-4e65-a53d-40e8a2a81283
+Invocation / Lambda / billed duration: 463.882241 ms / 3.36 ms / 113 ms
+Local prediction latency: 0.167895 ms
+Parity tolerance: 1e-9
+Maximum absolute difference: 1.1368683772161603e-13
+Schema mismatches: 0
+Result: PASS
+```
+
+Phase 6 regression verification:
+
+```text
+$ env -u PYTHONPATH .venv/bin/python -m pytest -q
+........................................                                 [100%]
+40 passed in 1.46s
+
+$ env -u PYTHONPATH .venv/bin/python -m pip check
+No broken requirements found.
+
+$ env -u PYTHONPATH .venv/bin/python <spot-check CSV assertions>
+spot_checks=32 visible=32 detector_valid=15 on_ball=0
+```
+
 ## Known issues
 
 - This host exports a ROS `PYTHONPATH`, which exposes unrelated ROS packages even inside a normal virtual environment. Verification commands used `env -u PYTHONPATH`; the README documents this host-specific workaround.
@@ -277,7 +327,8 @@ This was a real synchronous cold invocation through boto3 using the standard nam
 - OpenCV benchmark fixtures are generated videos, not independently recorded real motion. Their tracking MAE is `0.035545 px` for constant speed and `0.032061 px` for slowing motion.
 - Ground-truth targets falling between video frames are linearly interpolated. Latency is host-dependent and excluded from deterministic assertions.
 - The dashboard accepts prerecorded uploads only; Phase 4 deliberately excludes webcam streaming.
-- The repository contains no independently recorded real-world video fixture. Both dashboard samples are generated, so real-video robustness and adaptive performance remain unverified.
+- The three independently sourced real clips remain Git-ignored under `examples/real/` because they total about 63 MB and the Pexels license restricts standalone redistribution. Reproduction uses the official source links and downloads documented in `docs/REAL_VIDEO_VALIDATION.md`.
+- The current tracker failed to follow the target ball in all three real clips. Raw valid-frame coverage can be high while following the wrong object, so real-world tracking and adaptive performance remain unverified.
 - Dashboard actual points are later tracker measurements, not calibrated ground truth. They are used only after forecasts are produced and may contain tracker error.
 - The deployed Lambda function, execution role, and CloudWatch log group are AWS resources that may incur charges until removed with the documented cleanup commands. They were intentionally left deployed for the dashboard and competition demonstration.
 - The recorded `429.531348 ms` invocation and `106 ms` billed duration include a cold start and are one measurement, not a latency benchmark.
@@ -285,5 +336,5 @@ This was a real synchronous cold invocation through boto3 using the standard nam
 
 ## Next action
 
-Phase 5 passes its acceptance criteria. The next planned phase is Phase 6 quality, reproducibility, and measured impact; start it only after explicit authorization.
+Phase 6 is blocked on a trustworthy real-ball trajectory. Record a matching MVP scene with one saturated orange ball on a plain contrasting surface, or separately validate a scoped ROI/color-calibration change with independent center annotations. Do not start Phase 7 until Phase 6 has meaningful real-ball metrics.
 

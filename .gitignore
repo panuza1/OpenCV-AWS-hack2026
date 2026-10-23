@@ -16,6 +16,7 @@ __pycache__/
 
 # Reproducible generated artifacts.
 examples/generated/
+examples/real/
 outputs/
 dist/
 

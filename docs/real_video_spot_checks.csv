@@ -1,0 +1,33 @@
+video,frame,time_s,ball_visible,detector_valid,detection_on_ball,note
+basketball_6077402,35,1.40,true,true,false,detected floor feature
+basketball_6077402,53,2.12,true,true,false,detected floor feature
+basketball_6077402,71,2.84,true,false,false,no accepted contour
+basketball_6077402,89,3.56,true,false,false,no accepted contour
+basketball_6077402,107,4.28,true,false,false,no accepted contour
+basketball_6077402,124,4.96,true,true,false,detected floor feature
+basketball_6077402,142,5.68,true,false,false,no accepted contour
+basketball_6077402,160,6.40,true,false,false,no accepted contour
+billiards_6254504,0,0.00,true,false,false,white ball outside orange HSV range
+billiards_6254504,29,1.16,true,false,false,white ball outside orange HSV range
+billiards_6254504,58,2.32,true,false,false,white ball outside orange HSV range
+billiards_6254504,87,3.48,true,false,false,white ball outside orange HSV range
+billiards_6254504,117,4.68,true,false,false,white ball outside orange HSV range
+billiards_6254504,146,5.84,true,false,false,white ball outside orange HSV range
+billiards_6254504,175,7.00,true,false,false,white ball outside orange HSV range
+billiards_6254504,204,8.16,true,false,false,white ball outside orange HSV range
+billiards_6254504,234,9.36,true,false,false,white ball outside orange HSV range
+billiards_6254504,263,10.52,true,false,false,white ball outside orange HSV range
+billiards_6254504,292,11.68,true,false,false,white ball outside orange HSV range
+billiards_6254504,321,12.84,true,false,false,white ball outside orange HSV range
+disco_5751090,0,0.00,true,true,false,detected hanging cord
+disco_5751090,15,0.60,true,true,false,detected hanging cord
+disco_5751090,31,1.24,true,true,false,detected hanging cord
+disco_5751090,46,1.84,true,true,false,detected hanging cord
+disco_5751090,61,2.44,true,true,false,detected hanging cord
+disco_5751090,77,3.08,true,true,false,detected hanging cord
+disco_5751090,92,3.68,true,true,false,detected hanging cord
+disco_5751090,108,4.32,true,true,false,detected hanging cord
+disco_5751090,123,4.92,true,true,false,detected hanging cord
+disco_5751090,139,5.56,true,true,false,detected hanging cord
+disco_5751090,154,6.16,true,true,false,detected hanging cord
+disco_5751090,170,6.80,true,true,false,detected hanging cord

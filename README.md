@@ -56,6 +56,12 @@ The seeded CPU benchmark covers constant velocity, constant and changing deceler
 
 The bundled videos are synthetic fixtures. Their tracker measurements are evaluated against separately loaded rendered-center ground truth; these results do not establish accuracy on independently recorded real video.
 
+## Phase 6 real-video validation
+
+Three permitted Pexels clips were downloaded through their official free-download redirects and tested without changing the detector. The basketball produced 40.1% raw coverage on floor features, the white billiard ball produced no detections, and the disco clip produced 100% coverage of a hanging cord. A 32-frame manual spot check found zero on-ball detections, so tracker-relative forecast errors are documented only as pipeline diagnostics.
+
+See [real-video validation](docs/REAL_VIDEO_VALIDATION.md) for sources, license restrictions, authorized download commands, media hashes, scene inspection, all four model results, the manual checks, and real Lambda parity evidence. Downloaded originals remain under the Git-ignored `examples/real/` directory.
+
 ## Run the Phase 4 dashboard
 
 From the repository root:
@@ -70,7 +76,7 @@ The Benchmark Results tab reads the existing Phase 3 artifact at `outputs/evalua
 
 `LOCAL` is the default execution mode. `AWS` keeps OpenCV tracking local and sends only the causal observation prefix to the configured Lambda. It has no silent fallback and displays local/cloud parity and real invocation metadata. See [AWS deployment](docs/AWS_DEPLOYMENT.md) for the request contract, least-privilege IAM setup, deployment, invocation, evidence, and cleanup commands. Cloud deployment and verification require explicit authorization and valid AWS credentials.
 
-Predictions remain causal: the selected cutoff determines the observation prefix sent to the physics engine. Later tracker points are joined only after prediction for evaluation and are visually labeled. Pixel-space measurements are not calibrated physical units. The repository currently has generated fixtures only, so independently recorded real-world and real-world adaptive performance remain unverified.
+Predictions remain causal: the selected cutoff determines the observation prefix sent to the physics engine. Later tracker points are joined only after prediction for evaluation and are visually labeled. Pixel-space measurements are not calibrated physical units. Independently sourced real-video validation currently fails at perception, so real-world adaptive performance remains unverified.
 
 ## Tracking constraints
 
