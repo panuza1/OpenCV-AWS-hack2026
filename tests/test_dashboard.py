@@ -1,5 +1,6 @@
 import copy
 import json
+import subprocess
 
 import cv2
 import numpy as np
@@ -153,6 +154,22 @@ def test_automatic_predictions_are_causal_and_video_is_synchronized(tmp_path):
     output_path = tmp_path / "comparison.mp4"
     with output_path.open("wb") as stream:
         stream.write(video)
+    probe = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
+            "-show_entries",
+            "stream=codec_name,pix_fmt,avg_frame_rate,nb_read_frames,duration",
+            "-of", "json", str(output_path),
+        ],
+        check=True, capture_output=True, text=True,
+    )
+    stream = json.loads(probe.stdout)["streams"][0]
+    assert stream["codec_name"] == "h264"
+    assert stream["pix_fmt"] == "yuv420p"
+    assert stream["avg_frame_rate"] == "30/1"
+    assert int(stream["nb_read_frames"]) == len(observations)
+    assert float(stream["duration"]) == pytest.approx(5.0)
+    assert video.find(b"moov") < video.find(b"mdat")
     capture = cv2.VideoCapture(str(output_path))
     try:
         assert round(capture.get(cv2.CAP_PROP_FRAME_COUNT)) == len(observations)
@@ -162,6 +179,29 @@ def test_automatic_predictions_are_causal_and_video_is_synchronized(tmp_path):
     finally:
         capture.release()
     assert metadata["output_frames"] == len(observations)
+    assert metadata["output_codec"] == "h264"
+    assert metadata["output_pixel_format"] == "yuv420p"
+
+
+def test_h264_conversion_errors_are_explicit(monkeypatch, tmp_path):
+    source = tmp_path / "source.mp4"
+    output = tmp_path / "output.mp4"
+    source.write_bytes(b"not decoded when ffmpeg is missing")
+    monkeypatch.setattr(dashboard.shutil, "which", lambda _name: None)
+    with pytest.raises(ValueError, match="FFmpeg and ffprobe are required"):
+        dashboard._transcode_browser_mp4(source, output, 1, 30.0)
+
+    monkeypatch.setattr(dashboard.shutil, "which", lambda name: name)
+    monkeypatch.setattr(
+        dashboard.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="libx264 unavailable"
+        ),
+    )
+    with pytest.raises(ValueError, match="libx264 unavailable"):
+        dashboard._transcode_browser_mp4(source, output, 1, 30.0)
+    assert not output.exists()
 
 
 @pytest.mark.parametrize("size", ((1280, 720), (1920, 1080)))

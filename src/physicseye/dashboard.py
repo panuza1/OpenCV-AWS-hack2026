@@ -4,6 +4,8 @@ import csv
 import io
 import json
 import math
+import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -202,10 +204,74 @@ def prepare_automatic_predictions(observations, frame_width):
     return timeline
 
 
+def _transcode_browser_mp4(source_path, output_path, expected_frames, expected_fps):
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        raise ValueError(
+            "FFmpeg and ffprobe are required for browser-compatible H.264 video; "
+            "install the ffmpeg system package"
+        )
+    conversion = subprocess.run(
+        [
+            ffmpeg, "-nostdin", "-y", "-loglevel", "error", "-i", str(source_path),
+            "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart", str(output_path),
+        ],
+        capture_output=True, text=True,
+    )
+    if conversion.returncode:
+        Path(output_path).unlink(missing_ok=True)
+        detail = conversion.stderr.strip() or "unknown FFmpeg error"
+        raise ValueError(f"Could not convert comparison video to H.264: {detail}")
+
+    probe = subprocess.run(
+        [
+            ffprobe, "-v", "error", "-count_frames", "-select_streams", "v:0",
+            "-show_entries",
+            "stream=codec_name,pix_fmt,avg_frame_rate,nb_read_frames,duration",
+            "-of", "json", str(output_path),
+        ],
+        capture_output=True, text=True,
+    )
+    try:
+        stream = json.loads(probe.stdout)["streams"][0]
+        numerator, denominator = map(int, stream["avg_frame_rate"].split("/"))
+        actual_fps = numerator / denominator
+        frame_count = int(stream["nb_read_frames"])
+        duration_s = float(stream["duration"])
+    except (
+        KeyError, IndexError, TypeError, ValueError, ZeroDivisionError,
+        json.JSONDecodeError,
+    ) as error:
+        Path(output_path).unlink(missing_ok=True)
+        detail = probe.stderr.strip() or str(error)
+        raise ValueError(f"Could not verify the H.264 comparison video: {detail}") from error
+    expected_duration_s = expected_frames / expected_fps
+    if (
+        probe.returncode
+        or stream["codec_name"] != "h264"
+        or stream["pix_fmt"] != "yuv420p"
+        or frame_count != expected_frames
+        or abs(actual_fps - expected_fps) > 0.01
+        or abs(duration_s - expected_duration_s) > 0.02
+    ):
+        Path(output_path).unlink(missing_ok=True)
+        raise ValueError("H.264 comparison video failed codec or timing verification")
+    return {
+        "codec": stream["codec_name"],
+        "pixel_format": stream["pix_fmt"],
+        "duration_s": duration_s,
+    }
+
+
 def render_comparison_video(video_path, observations, prediction_timeline, output_path):
     """Encode original and annotated frames side by side without buffering frames."""
+    output_path = Path(output_path)
+    intermediate_path = output_path.with_name(f".{output_path.stem}-mpeg4.mp4")
     capture = cv2.VideoCapture(str(video_path))
     writer = None
+    render_finished = False
     try:
         if not capture.isOpened():
             raise ValueError("Could not open the uploaded video")
@@ -218,7 +284,7 @@ def render_comparison_video(video_path, observations, prediction_timeline, outpu
         render_width -= render_width % 2
         render_height -= render_height % 2
         writer = cv2.VideoWriter(
-            str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), fps,
+            str(intermediate_path), cv2.VideoWriter_fourcc(*"mp4v"), fps,
             (render_width * 2, render_height),
         )
         if not writer.isOpened():
@@ -298,18 +364,28 @@ def render_comparison_video(video_path, observations, prediction_timeline, outpu
             )
             writer.write(cv2.hconcat((original, annotated)))
             frame_index += 1
+        render_finished = True
     finally:
         capture.release()
         if writer is not None:
             writer.release()
-    if frame_index != len(observations):
-        raise ValueError("Decoded frame count does not match tracking observations")
-    return {
-        "frames": frame_index,
-        "fps": fps,
-        "width": render_width * 2,
-        "height": render_height,
-    }
+        if not render_finished:
+            intermediate_path.unlink(missing_ok=True)
+    try:
+        if frame_index != len(observations):
+            raise ValueError("Decoded frame count does not match tracking observations")
+        codec_metadata = _transcode_browser_mp4(
+            intermediate_path, output_path, frame_index, fps
+        )
+        return {
+            "frames": frame_index,
+            "fps": fps,
+            "width": render_width * 2,
+            "height": render_height,
+            **codec_metadata,
+        }
+    finally:
+        intermediate_path.unlink(missing_ok=True)
 
 
 def render_comparison_video_bytes(filename, data, observations, prediction_timeline):

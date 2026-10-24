@@ -75,6 +75,8 @@ The post-release automatic-video upgrade was verified on 2026-10-24. Uploaded re
 - Added automatic causal cutoff/horizon selection and sequential 1280x720 side-by-side encoding with history, dashed adaptive forecast, endpoint, direction arrow, angle, timestamps, and status.
 - Made upload + automatic analysis the default dashboard path while retaining HSV, manual ROI, explicit model controls, benchmark views, and AWS parity under Advanced Options.
 - Added automatic-tracker, causality, video synchronization, 720p/1080p, and annotated real-video regression coverage without changing dependencies or the physics engine.
+- Replaced the browser-facing MPEG-4 Part 2 comparison file with a verified H.264/AVC, `yuv420p`, fast-start MP4 while retaining sequential OpenCV rendering and synchronized frames.
+- Added explicit FFmpeg/ffprobe failure handling, codec/timing regression coverage, and root `packages.txt` deployment configuration for Streamlit Community Cloud.
 
 ## Verified environment
 
@@ -425,6 +427,28 @@ Parity tolerance / result: 1e-9 / PASS
 
 Automatic real-video prediction remained mixed. Against the sparse later manual points, adaptive MAE was `188.776 px` (`n=4`, 0.4 s) for basketball, `838.801 px` (`n=10`, 1.16–1.20 s) for billiards, and `233.885 px` (`n=9`, 0.60–0.64 s) for disco. The billiards sequence contains hand relaunches; disco adaptive prediction was 0.485% worse than frozen; the large basketball/disco tracker-center errors preclude strong physics claims.
 
+Browser-video compatibility verification:
+
+```text
+Before: codec_name=mpeg4; codec_long_name=MPEG-4 part 2
+After: codec_name=h264; codec_long_name=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10
+Pixel format / fast start: yuv420p / moov before mdat
+Resolution / frame rate / frames / duration: 640x240 / 30 FPS / 150 / 5.000 s
+Headless Google Chrome playback: playing:640x240:5.000:0.500
+
+$ env -u PYTHONPATH .venv/bin/python -m pytest tests/test_dashboard.py -q
+12 passed in 3.05s
+$ env -u PYTHONPATH .venv/bin/python -m pytest -q
+55 passed in 36.57s
+$ env -u PYTHONPATH .venv/bin/python -m pip check
+No broken requirements found.
+$ env -u PYTHONPATH .venv/bin/streamlit run app.py --server.headless true --server.port 8509
+$ curl --fail http://localhost:8509/_stcore/health
+ok
+```
+
+Google Chrome loaded the generated MP4, entered playback, reported the expected 640x240 dimensions and 5.000-second duration, and advanced `currentTime` to 0.500 seconds. ffprobe also decoded and counted every frame, and OpenCV reopened the final file.
+
 ## Known issues
 
 - This host exports a ROS `PYTHONPATH`, which exposes unrelated ROS packages even inside a normal virtual environment. Verification commands used `env -u PYTHONPATH`; the README documents this host-specific workaround.
@@ -439,6 +463,7 @@ Automatic real-video prediction remained mixed. Against the sparse later manual 
 - Ground-truth targets falling between video frames are linearly interpolated. Latency is host-dependent and excluded from deterministic assertions.
 - The dashboard automatically processes prerecorded uploads; it does not provide real-time camera inference.
 - Uploaded frames above 2.1 megapixels are rejected before decoding. Tested 720p and 1080p inputs are processed at no more than 1280x720; 4K requires prior conversion.
+- Comparison-video playback requires the `ffmpeg` system package with `libx264`; Streamlit Community Cloud installs it from the repository's `packages.txt`, while other hosts must provide it separately.
 - The three independently sourced real clips remain Git-ignored under `examples/real/` because they total about 63 MB and the Pexels license restricts standalone redistribution. Reproduction uses the official source links and downloads documented in `docs/REAL_VIDEO_VALIDATION.md`.
 - The 31 visible and three absent manual reference rows validate target identity only at sparse frames. Annotation uncertainty is ±8–25 px; the disco model differences are below that uncertainty.
 - Basketball perspective creates apparent acceleration, billiards hands repeatedly redirect the ball, and disco reflections/near-stationarity violate or weaken the simple deceleration model. The real results do not establish calibrated physical parameters or universal adaptive benefit.
