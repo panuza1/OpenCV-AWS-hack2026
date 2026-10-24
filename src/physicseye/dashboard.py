@@ -265,8 +265,34 @@ def _transcode_browser_mp4(source_path, output_path, expected_frames, expected_f
     }
 
 
-def render_comparison_video(video_path, observations, prediction_timeline, output_path):
+def _comparison_forecast(forecast, observation, trajectory_kind):
+    if trajectory_kind == "flight":
+        return (
+            (forecast["anchor_x_px"], forecast["anchor_y_px"]),
+            [
+                point for point in forecast["predicted_points"]
+                if point["time_s"] > observation["time_s"]
+            ],
+            f'flight {forecast["direction_angle_deg"]:.1f} deg | fit R2 {forecast["fit_r2"]:.3f}',
+        )
+    model = forecast["prediction"]["models"]["adaptive_deceleration"]
+    return (
+        (forecast["anchor_x_px"], forecast["anchor_y_px"]),
+        [
+            point for point in model["predictions"]
+            if point["target_time_s"] > observation["time_s"]
+        ],
+        f'direction {forecast["direction_angle_deg"]:.1f} deg | horizon {forecast["horizon_s"]:.2f}s',
+    )
+
+
+def render_comparison_video(
+    video_path, observations, prediction_timeline, output_path,
+    *, trajectory_kind="rolling",
+):
     """Encode original and annotated frames side by side without buffering frames."""
+    if trajectory_kind not in ("rolling", "flight"):
+        raise ValueError(f"Unknown trajectory kind: {trajectory_kind}")
     output_path = Path(output_path)
     intermediate_path = output_path.with_name(f".{output_path.stem}-mpeg4.mp4")
     capture = cv2.VideoCapture(str(video_path))
@@ -320,29 +346,21 @@ def render_comparison_video(video_path, observations, prediction_timeline, outpu
 
             forecast = prediction_timeline[frame_index]
             if forecast is not None:
-                model = forecast["prediction"]["models"]["adaptive_deceleration"]
-                previous = (
-                    round(forecast["anchor_x_px"] * scale),
-                    round(forecast["anchor_y_px"] * scale),
+                anchor, future_points, label = _comparison_forecast(
+                    forecast, observation, trajectory_kind
                 )
-                future_points = [
-                    prediction for prediction in model["predictions"]
-                    if prediction["target_time_s"] > observation["time_s"]
-                ]
-                for prediction in future_points:
+                previous = (round(anchor[0] * scale), round(anchor[1] * scale))
+                for point in future_points:
                     target = (
-                        round(prediction["x_px"] * scale),
-                        round(prediction["y_px"] * scale),
+                        round(point["x_px"] * scale),
+                        round(point["y_px"] * scale),
                     )
                     _draw_dashed_line(annotated, previous, target, (14, 127, 255))
                     previous = target
                 if future_points:
                     cv2.arrowedLine(
                         annotated,
-                        (
-                            round(forecast["anchor_x_px"] * scale),
-                            round(forecast["anchor_y_px"] * scale),
-                        ),
+                        (round(anchor[0] * scale), round(anchor[1] * scale)),
                         previous,
                         (14, 127, 255),
                         2,
@@ -351,8 +369,7 @@ def render_comparison_video(video_path, observations, prediction_timeline, outpu
                     )
                     cv2.circle(annotated, previous, 7, (14, 127, 255), 2)
                 cv2.putText(
-                    annotated,
-                    f'direction {forecast["direction_angle_deg"]:.1f} deg | horizon {forecast["horizon_s"]:.2f}s',
+                    annotated, label,
                     (12, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                     (14, 127, 255), 2, cv2.LINE_AA,
                 )
@@ -388,7 +405,9 @@ def render_comparison_video(video_path, observations, prediction_timeline, outpu
         intermediate_path.unlink(missing_ok=True)
 
 
-def render_comparison_video_bytes(filename, data, observations, prediction_timeline):
+def render_comparison_video_bytes(
+    filename, data, observations, prediction_timeline, *, trajectory_kind="rolling"
+):
     suffix = validate_video_upload(filename, data)
     with tempfile.TemporaryDirectory() as directory:
         input_path = Path(directory) / f"input{suffix}"
@@ -396,7 +415,8 @@ def render_comparison_video_bytes(filename, data, observations, prediction_timel
         input_path.write_bytes(data)
         metadata = _video_metadata(input_path)
         render_metadata = render_comparison_video(
-            input_path, observations, prediction_timeline, output_path
+            input_path, observations, prediction_timeline, output_path,
+            trajectory_kind=trajectory_kind,
         )
         return output_path.read_bytes(), metadata | {
             f"output_{key}": value for key, value in render_metadata.items()

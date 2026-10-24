@@ -384,7 +384,7 @@ def track_video(
     if not cv2.__version__.startswith("5."):
         raise RuntimeError(f"PhysicsEye requires OpenCV 5, found {cv2.__version__}")
 
-    if mode not in ("auto_motion", "hsv", "roi_template"):
+    if mode not in ("auto_motion", "flight", "hsv", "roi_template"):
         raise VideoError(f"Unknown tracking mode: {mode}")
     if mode == "roi_template":
         if not isinstance(initial_frame, int) or isinstance(initial_frame, bool) or initial_frame < 0:
@@ -415,7 +415,7 @@ def track_video(
             readable, frame = capture.read()
             if not readable:
                 break
-            if mode == "auto_motion":
+            if mode in ("auto_motion", "flight"):
                 if "working_scale" not in automatic_state:
                     working_scale = min(
                         1.0,

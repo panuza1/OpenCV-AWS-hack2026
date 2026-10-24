@@ -77,6 +77,9 @@ The post-release automatic-video upgrade was verified on 2026-10-24. Uploaded re
 - Added automatic-tracker, causality, video synchronization, 720p/1080p, and annotated real-video regression coverage without changing dependencies or the physics engine.
 - Replaced the browser-facing MPEG-4 Part 2 comparison file with a verified H.264/AVC, `yuv420p`, fast-start MP4 while retaining sequential OpenCV rendering and synchronized frames.
 - Added explicit FFmpeg/ffprobe failure handling, codec/timing regression coverage, and root `packages.txt` deployment configuration for Streamlit Community Cloud.
+- Added a separate Flight Ball analysis mode that reuses the lightweight automatic detector but never routes airborne motion through rolling-friction physics.
+- Added causal one-second-window linear-x/quadratic-y projectile fitting, automatic short horizons, arc quality/direction metrics, and synchronized observed-versus-predicted flight overlays.
+- Added deterministic airborne tracking, occlusion, analytic fitting, future-leakage, endpoint-error, and browser-video regression tests; hoop outcome remains explicitly out of scope.
 
 ## Verified environment
 
@@ -98,6 +101,10 @@ Dependency consistency:
 ```text
 $ env -u PYTHONPATH .venv/bin/python -m pip check
 No broken requirements found.
+$ env -u PYTHONPATH .venv/bin/streamlit run app.py --server.headless true --server.port 8510
+$ curl --fail http://localhost:8510/_stcore/health
+ok
+Headless Google Chrome playback: playing:640x240:2.000:0.502
 ```
 
 Acceptance test:
@@ -449,12 +456,36 @@ ok
 
 Google Chrome loaded the generated MP4, entered playback, reported the expected 640x240 dimensions and 5.000-second duration, and advanced `currentTime` to 0.500 seconds. ffprobe also decoded and counted every frame, and OpenCV reopened the final file.
 
+Flight Ball synthetic verification:
+
+```text
+Frames / valid / coverage: 60 / 51 / 85.0%
+Center MAE: 2.729476 px
+Causal endpoint MAE: 7.525449 px over 6 forecasts
+Latest fit R² / fit RMSE: 0.999637 / 0.648610 px
+Latest direction / horizon: 43.378° / 0.386092 s
+Track + fit + H.264 render: 0.464640 s
+Output: h264, yuv420p, 60 frames, 30 FPS, 2.000 s, 640x240
+
+$ env -u PYTHONPATH .venv/bin/python -m pytest tests/test_flight.py tests/test_tracker.py tests/test_dashboard.py -q
+22 passed in 4.15s
+$ env -u PYTHONPATH .venv/bin/python -m pytest -q
+58 passed in 31.53s
+$ env -u PYTHONPATH .venv/bin/python -m pip check
+No broken requirements found.
+```
+
+The three deliberately hidden airborne frames remained invalid; neither the tracker nor the fitter inserted observed positions. The fitted future path is prediction-only and visually distinct. No hoop/basket result is produced because no independently validated hoop target or camera calibration exists.
+
+The Streamlit test harness selected **Flight Ball**, selected a bundled sample, completed automatic analysis with no exception, and displayed tracking coverage, processing time, direction, horizon, and arc-fit-quality metrics. The startup health check and headless Chrome playback check also passed.
+
 ## Known issues
 
 - This host exports a ROS `PYTHONPATH`, which exposes unrelated ROS packages even inside a normal virtual environment. Verification commands used `env -u PYTHONPATH`; the README documents this host-specific workaround.
 - Codec support depends on the OpenCV build and host. The generator validates `mp4v` and falls back to `MJPG`/AVI rather than assuming either works.
 - Generated videos and CSVs are reproducible local artifacts under `examples/generated/` and are intentionally Git-ignored.
 - Automatic mode assumes a distinct moving ball and a fixed or slowly moving camera. Camera motion, reflections, cuts, long occlusion, extreme scale change, or a similar moving circular object can still produce invalid or incorrect detections. HSV and ROI remain explicit fallbacks.
+- Flight Ball fits a short image-space parabola, not calibrated 3D ballistics. Camera perspective/motion, spin, drag, long occlusion, ball-size change, and player overlap can invalidate its extrapolation; hoop and basket outcome are not implemented.
 - Video time uses `frame / fps`; variable-frame-rate media may require transcoding or an explicit trustworthy FPS override.
 - Physics estimates assume approximately straight, direction-stable motion in image space. They do not model turns, collisions, perspective, or calibrated physical units.
 - Adaptive feedback uses the first valid observation at/after its 0.25-second target, up to 0.125 seconds late; a later target is logged and skipped.

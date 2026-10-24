@@ -23,6 +23,7 @@ from physicseye.dashboard import (
     video_metadata_bytes,
 )
 from physicseye.cloud import execute_prediction
+from physicseye.flight import prepare_flight_predictions
 from physicseye.tracker import VideoError
 
 
@@ -92,6 +93,9 @@ with overview:
 with video_tab:
     st.subheader("Automatic uploaded-video analysis")
     st.caption("Uploaded files are processed offline; this is not live camera inference.")
+    analysis_mode = st.radio(
+        "Analysis mode", ("Rolling Ball", "Flight Ball"), horizontal=True
+    )
     filename, video_bytes = _video_source()
     metadata = None
     if filename:
@@ -105,13 +109,25 @@ with video_tab:
         except ValueError as error:
             st.error(str(error))
 
-    tracker_options = {"mode": "auto_motion"}
-    tracking_mode = "Automatic motion + circle"
+    tracker_options = {
+        "mode": "flight" if analysis_mode == "Flight Ball" else "auto_motion"
+    }
+    tracking_mode = (
+        "Flight automatic"
+        if analysis_mode == "Flight Ball" else "Automatic motion + circle"
+    )
     with st.expander("Advanced Options"):
         tracking_mode = st.selectbox(
             "Tracking mode",
-            ("Automatic motion + circle", "Orange HSV", "Select target ROI"),
+            ("Flight automatic",)
+            if analysis_mode == "Flight Ball"
+            else ("Automatic motion + circle", "Orange HSV", "Select target ROI"),
         )
+        if analysis_mode == "Flight Ball":
+            st.caption(
+                "Flight mode automatically uses motion, circularity, temporal consistency, "
+                "and appearance continuation. Rolling-ball physics is not used."
+            )
         if tracking_mode == "Orange HSV":
             tracker_options = {"mode": "hsv"}
         elif tracking_mode == "Select target ROI":
@@ -141,7 +157,7 @@ with video_tab:
                 }
                 st.caption("Adjust both ranges until the green box tightly surrounds only the ball.")
 
-        if tracking_mode != "Automatic motion + circle" and st.button(
+        if analysis_mode == "Rolling Ball" and tracking_mode != "Automatic motion + circle" and st.button(
             "Analyze with selected fallback"
         ):
             if filename and tracker_options is not None:
@@ -150,7 +166,7 @@ with video_tab:
                         filename, video_bytes, **tracker_options
                     )
                     st.session_state.input_key = (
-                        hashlib.sha256(video_bytes).hexdigest(), tracking_mode
+                        hashlib.sha256(video_bytes).hexdigest(), analysis_mode, tracking_mode
                     )
                     st.session_state.video_name = filename
                     st.session_state.video_bytes = video_bytes
@@ -161,25 +177,34 @@ with video_tab:
                     st.error(str(error))
 
     input_key = (
-        (hashlib.sha256(video_bytes).hexdigest(), tracking_mode)
+        (hashlib.sha256(video_bytes).hexdigest(), analysis_mode, tracking_mode)
         if filename else None
+    )
+    automatic_mode = tracking_mode in (
+        "Automatic motion + circle", "Flight automatic"
     )
     if (
         filename and metadata is not None
-        and tracking_mode == "Automatic motion + circle"
+        and automatic_mode
         and st.session_state.get("input_key") != input_key
     ):
         try:
             with st.spinner("Tracking the ball and encoding the prediction video..."):
                 started = time.perf_counter()
                 observations = track_video_bytes(
-                    filename, video_bytes, mode="auto_motion"
+                    filename, video_bytes,
+                    mode="flight" if analysis_mode == "Flight Ball" else "auto_motion",
                 )
-                timeline = prepare_automatic_predictions(
-                    observations, metadata["width"]
+                timeline = (
+                    prepare_flight_predictions(observations, metadata["width"])
+                    if analysis_mode == "Flight Ball"
+                    else prepare_automatic_predictions(observations, metadata["width"])
                 )
                 comparison_video, render_metadata = render_comparison_video_bytes(
-                    filename, video_bytes, observations, timeline
+                    filename, video_bytes, observations, timeline,
+                    trajectory_kind=(
+                        "flight" if analysis_mode == "Flight Ball" else "rolling"
+                    ),
                 )
                 latest = next((item for item in reversed(timeline) if item), None)
                 st.session_state.track = observations
@@ -191,13 +216,16 @@ with video_tab:
                 st.session_state.video_name = filename
                 st.session_state.video_bytes = video_bytes
                 st.session_state.tracking_mode = tracking_mode
-                if latest:
+                st.session_state.analysis_mode = analysis_mode
+                if latest and analysis_mode == "Rolling Ball":
                     st.session_state.analysis = prepare_analysis(
                         observations,
                         latest["cutoff_time_s"],
                         [row["horizon_s"] for row in latest["prediction"]["models"]["adaptive_deceleration"]["predictions"]],
                         latest["prediction"],
                     )
+                elif analysis_mode == "Flight Ball":
+                    st.session_state.pop("analysis", None)
         except (ValueError, VideoError, RuntimeError) as error:
             st.error(str(error))
 
@@ -215,7 +243,7 @@ with video_tab:
         col4.metric(
             "Processing time",
             f'{st.session_state.get("processing_time_s", 0.0):.2f} s'
-            if tracking_mode == "Automatic motion + circle" else "manual",
+            if automatic_mode else "manual",
         )
         confidence_rows = [point for point in observations if point.get("valid") and "confidence" in point]
         if confidence_rows:
@@ -231,30 +259,52 @@ with video_tab:
             if failures:
                 reasons = sorted({point["status"] for point in failures})
                 st.warning(f'Tracking failures: {", ".join(reasons)}')
-        if tracking_mode == "Automatic motion + circle":
+        if automatic_mode:
             timeline = st.session_state.get("automatic_timeline", [])
             latest = next((item for item in reversed(timeline) if item), None)
             if latest:
-                direction_cols = st.columns(2)
+                direction_cols = st.columns(
+                    3 if analysis_mode == "Flight Ball" else 2
+                )
                 direction_cols[0].metric(
                     "Latest direction", f'{latest["direction_angle_deg"]:.1f}°'
                 )
                 direction_cols[1].metric(
                     "Automatic horizon", f'{latest["horizon_s"]:.2f} s'
                 )
+                if analysis_mode == "Flight Ball":
+                    direction_cols[2].metric(
+                        "Arc fit quality", f'{latest["fit_r2"]:.3f} R²'
+                    )
                 st.caption("Image coordinates: 0° points right and +90° points down.")
             if st.session_state.get("comparison_video"):
                 st.video(st.session_state.comparison_video)
                 st.download_button(
                     "Download side-by-side MP4",
                     st.session_state.comparison_video,
-                    "physicseye-comparison.mp4",
+                    (
+                        "physicseye-flight-comparison.mp4"
+                        if analysis_mode == "Flight Ball"
+                        else "physicseye-comparison.mp4"
+                    ),
                     "video/mp4",
                 )
                 st.caption(
-                    "Left: original. Right: tracked history in gray/green and the adaptive future path in dashed orange."
+                    "Left: original. Right: tracked history in gray/green and the "
+                    + (
+                        "projectile fit"
+                        if analysis_mode == "Flight Ball" else "adaptive future path"
+                    )
+                    + " in dashed orange."
                 )
-        if valid_count < 4:
+        if analysis_mode == "Flight Ball" and valid_count < 6:
+            st.error("Too few valid tracked positions for flight trajectory fitting.")
+        elif analysis_mode == "Flight Ball":
+            st.caption(
+                "Flight prediction is a short-window image-space parabola; it does not "
+                "predict hoop contact, collisions, or basket outcome."
+            )
+        elif valid_count < 4:
             st.error("Too few valid tracked positions for physics prediction.")
         else:
           with st.expander("Advanced prediction controls and AWS parity"):

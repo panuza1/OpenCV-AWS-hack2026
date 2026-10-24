@@ -6,7 +6,7 @@ The core idea is simple: **predict first, observe the outcome later, measure the
 
 ## What the MVP demonstrates
 
-- OpenCV 5 automatic motion/circle tracking across ball colors, with orange-HSV and user-initialized ROI fallbacks.
+- OpenCV 5 automatic motion/circle tracking across ball colors, with rolling-ball and airborne-flight analysis plus orange-HSV and user-initialized ROI fallbacks.
 - Four CPU-friendly trajectory models using identical causal observation histories.
 - A persistent effective-deceleration estimate learned from earlier forecast residuals.
 - A five-tab Streamlit dashboard with tracking status, overlays, model errors, adaptive traces, benchmark results, and exports.
@@ -112,6 +112,12 @@ The default Streamlit flow is upload, automatic analysis, synchronized side-by-s
 Comparison videos are transcoded from OpenCV's intermediate `mp4v` stream to browser-compatible H.264 with `libx264`, `yuv420p`, and `+faststart`, then checked with `ffprobe` for codec, frame count, FPS, and duration before Streamlit receives the file. A missing encoder or failed verification is shown as an error; the app does not return the incompatible intermediate. Root-level `packages.txt` installs the `ffmpeg` system package on Streamlit Community Cloud as described in its [external-dependency documentation](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/app-dependencies#apt-get-dependencies).
 
 **Advanced Options** retains **Orange HSV** for generated samples and **Select target ROI** when automatic appearance/continuity checks cannot isolate the intended ball. Manual cutoffs, horizons, model comparison, and AWS parity remain available without being required by the default flow. The other dashboard tabs continue to expose all four models, later observations labeled as evaluation-only, benchmark data, adaptive updates, skipped-update reasons, and JSON/CSV exports.
+
+### Flight Ball mode
+
+Choose **Flight Ball** to track an airborne ball with the same lightweight motion, circularity, temporal-consistency, and appearance-continuation checks, then fit a separate short-window projectile model. Horizontal image motion is fitted linearly and vertical image motion quadratically using only valid observations at or before each cutoff. The dashboard reports coverage, processing time, direction, automatic horizon, and combined 2D fit R²; the video distinguishes observed history from the dashed parabolic forecast and endpoint.
+
+The deterministic 320x240 airborne fixture achieved 51/60 valid frames (85% coverage), 2.729 px center MAE, and 7.525 px endpoint MAE across six causal forecasts. Its deliberate three-frame occlusion remained invalid. These controlled image-space results do not establish accuracy on broadcast footage. Flight mode does not reuse rolling-friction physics and does not predict basket outcome, hoop contact, bounce, or collision because no reliable hoop detector or calibrated court geometry is implemented.
 
 The Benchmark Results tab reads the existing Phase 3 artifact at `outputs/evaluation.json`; run `env -u PYTHONPATH .venv/bin/python scripts/run_benchmark.py` if it is missing. The dashboard reports regressions as well as improvements and does not claim that adaptive prediction is always best.
 
