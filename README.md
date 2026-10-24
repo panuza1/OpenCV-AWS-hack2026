@@ -1,5 +1,7 @@
 # PhysicsEye
 
+**Live Demo:** [https://physicseye.streamlit.app/](https://physicseye.streamlit.app/)
+
 PhysicsEye turns fixed-camera ball video into measured trajectories, causal physics forecasts, and reproducible benchmark results. It compares constant-velocity, refitted-deceleration, frozen-parameter, and adaptive-deceleration models locally or through a private AWS Lambda function.
 
 The core idea is simple: **predict first, observe the outcome later, measure the error, then update the next prediction**. Every adaptive update is timestamped, bounded, and reconstructable; future observations are rejected from earlier prediction requests.
