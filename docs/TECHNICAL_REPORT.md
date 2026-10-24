@@ -47,7 +47,7 @@ Two tracking modes share the same observation shape:
 
 Invalid tracking produces null coordinates. The tracker does not interpolate a position through an occlusion. ROI observations additionally expose the bounding box, status, and a matching score used as a diagnostic confidence value, not a calibrated probability.
 
-The dashboard limits uploaded MP4, AVI, or MOV files to 100 MB and 60 seconds, writes bytes under a generated temporary name rather than trusting the client path, validates metadata, and reports tracking failures.
+The dashboard limits uploaded MP4, AVI, or MOV files to 100 MB, 60 seconds, and 2.1 megapixels per frame (1920x1080), writes bytes under a generated temporary name rather than trusting the client path, validates metadata, and reports tracking failures. The resolution guard was added after a 4K flow reached about 910 MB in a constrained Linux container while an equivalent 1080p flow peaked near 217 MB.
 
 ## Physics prediction methods
 

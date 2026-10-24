@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import pytest
 
+import physicseye.dashboard as dashboard
 from physicseye.dashboard import (
     MODEL_META,
     load_benchmark,
@@ -56,7 +57,7 @@ def test_roi_preview_and_tracking_integration():
     metadata = video_metadata_bytes("slowing_down.mp4", data)
     assert metadata == {
         "width": 320, "height": 240, "frame_count": 150,
-        "fps": 30.0, "duration_s": 5.0,
+        "fps": 30.0, "duration_s": 5.0, "decoded_frame_mib": 0.2197265625,
     }
     preview = render_roi_preview_bytes("slowing_down.mp4", data, 0, (27, 107, 26, 26))
     assert preview.shape == (240, 320, 3)
@@ -81,6 +82,27 @@ def test_upload_duration_limit(tmp_path):
     writer.release()
     with pytest.raises(ValueError, match="60-second limit"):
         track_video_bytes("long.avi", video.read_bytes())
+
+
+def test_4k_upload_is_rejected_before_frame_decode(monkeypatch):
+    class MetadataOnlyCapture:
+        def isOpened(self):
+            return True
+
+        def get(self, property_id):
+            return {
+                cv2.CAP_PROP_FRAME_WIDTH: 4096,
+                cv2.CAP_PROP_FRAME_HEIGHT: 2160,
+                cv2.CAP_PROP_FRAME_COUNT: 197,
+                cv2.CAP_PROP_FPS: 25,
+            }[property_id]
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(dashboard.cv2, "VideoCapture", lambda _path: MetadataOnlyCapture())
+    with pytest.raises(ValueError, match=r"4096x2160.*25\.3 MiB.*2.1-megapixel"):
+        dashboard._video_metadata("4k.mp4")
 
 
 def test_benchmark_loading_and_missing_file(tmp_path):

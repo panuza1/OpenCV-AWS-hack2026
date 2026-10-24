@@ -22,6 +22,7 @@ MODEL_META = {
 ALLOWED_VIDEO_SUFFIXES = {".mp4", ".avi", ".mov"}
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 MAX_VIDEO_DURATION_S = 60.0
+MAX_VIDEO_PIXELS = 1920 * 1080
 
 
 def validate_video_upload(filename, data):
@@ -57,12 +58,20 @@ def _video_metadata(path):
         capture.release()
     if width <= 0 or height <= 0 or frame_count <= 0 or not math.isfinite(fps) or fps <= 0:
         raise ValueError("Video metadata is incomplete")
+    decoded_frame_mib = width * height * 3 / (1024 * 1024)
+    if width * height > MAX_VIDEO_PIXELS:
+        raise ValueError(
+            f"Video resolution {width}x{height} decodes to {decoded_frame_mib:.1f} MiB "
+            "per BGR frame and exceeds the 2.1-megapixel limit; "
+            "resize to 1920x1080 or smaller"
+        )
     duration_s = frame_count / fps
     if duration_s > MAX_VIDEO_DURATION_S:
         raise ValueError(f"Video exceeds the {MAX_VIDEO_DURATION_S:g}-second limit")
     return {
         "width": width, "height": height, "frame_count": frame_count,
         "fps": fps, "duration_s": duration_s,
+        "decoded_frame_mib": decoded_frame_mib,
     }
 
 

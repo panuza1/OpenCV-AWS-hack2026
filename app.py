@@ -92,6 +92,11 @@ with video_tab:
     if filename and tracking_mode == "Select target ROI":
         try:
             metadata = video_metadata_bytes(filename, video_bytes)
+            st.caption(
+                f'Input {metadata["width"]}x{metadata["height"]} at {metadata["fps"]:g} FPS; '
+                f'one decoded BGR frame is {metadata["decoded_frame_mib"]:.1f} MiB '
+                '(decoder buffers require additional memory).'
+            )
             initial_frame = st.slider(
                 "Initialization frame", 0, metadata["frame_count"] - 1, 0
             )
