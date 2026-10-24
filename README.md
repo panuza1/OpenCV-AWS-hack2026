@@ -6,7 +6,7 @@ The core idea is simple: **predict first, observe the outcome later, measure the
 
 ## What the MVP demonstrates
 
-- OpenCV 5 orange-HSV tracking for deterministic samples and user-initialized ROI template tracking for real balls.
+- OpenCV 5 automatic motion/circle tracking across ball colors, with orange-HSV and user-initialized ROI fallbacks.
 - Four CPU-friendly trajectory models using identical causal observation histories.
 - A persistent effective-deceleration estimate learned from earlier forecast residuals.
 - A five-tab Streamlit dashboard with tracking status, overlays, model errors, adaptive traces, benchmark results, and exports.
@@ -107,7 +107,9 @@ From the repository root:
 env -u PYTHONPATH .venv/bin/streamlit run app.py
 ```
 
-The Streamlit dashboard can analyze either bundled sample or an uploaded MP4, AVI, or MOV file up to 100 MB, 60 seconds, and 2.1 megapixels per frame (1920x1080). This resolution guard prevents 4K decoder buffers from exhausting Streamlit Community Cloud memory; resize larger videos before upload. **Orange HSV** preserves the generated-sample path. **Select target ROI** lets a user choose an initialization frame and box around another ball; the preview, box, confidence/status, invalid-frame warnings, tracked position, and predictions use actual tracker output. It shows forecasts from all four Phase 2 models, later tracker observations labeled as evaluation-only, pixel-space errors, model parameters, chronological adaptive updates and skipped-update reasons. Analysis can be downloaded as JSON or CSV.
+The default Streamlit flow is upload, automatic analysis, synchronized side-by-side playback, and MP4 download. The left panel is the original frame; the right panel shows the automatically selected ball, tracked history, dashed causal forecast, endpoint, direction arrow, image-coordinate angle, horizon, and tracking status. MP4, AVI, and MOV inputs are accepted up to 100 MB, 60 seconds, and 2.1 megapixels per frame (1920x1080). Frames are processed sequentially at a working resolution no larger than 1280x720, and the compressed result—not decoded frames—is retained. A clean 512 MB container completed the tested 1080p clip; 4K is rejected before decoding and should be resized first.
+
+**Advanced Options** retains **Orange HSV** for generated samples and **Select target ROI** when automatic appearance/continuity checks cannot isolate the intended ball. Manual cutoffs, horizons, model comparison, and AWS parity remain available without being required by the default flow. The other dashboard tabs continue to expose all four models, later observations labeled as evaluation-only, benchmark data, adaptive updates, skipped-update reasons, and JSON/CSV exports.
 
 The Benchmark Results tab reads the existing Phase 3 artifact at `outputs/evaluation.json`; run `env -u PYTHONPATH .venv/bin/python scripts/run_benchmark.py` if it is missing. The dashboard reports regressions as well as improvements and does not claim that adaptive prediction is always best.
 
@@ -117,9 +119,13 @@ Predictions remain causal: the selected cutoff determines the observation prefix
 
 ## Tracking constraints
 
-The default detector expects one orange ball, a dark or plain background, a fixed camera, even lighting, and little occlusion. It thresholds HSV values from `(5, 100, 100)` through `(25, 255, 255)`, removes small mask noise with 5x5 morphological operations, accepts contour areas from 100 pixels² through 10% of the frame, and rejects center jumps over 50 pixels per elapsed frame.
+Automatic mode combines frame differencing, a small MOG2 foreground model, circularity/extent checks, and three-frame temporal consistency before it initializes the existing appearance tracker. Confidence, size, and displacement gates reject uncertain matches; after repeated failures it searches globally again. Missing and occluded positions stay invalid rather than being interpolated. It works best with one visually distinct moving ball and a fixed or slowly moving camera; reflections, cuts, camera motion, similarly shaped moving objects, and strong scale changes remain failure modes.
 
-ROI mode supports other appearances without a neural model. Select a tight ball box on a clear frame. It uses normalized grayscale template matching at five nearby scales, local motion continuity, size limits, and a confidence gate. It does not fabricate positions during a failed match. It assumes a roughly fixed camera and can still fail under long occlusion, extreme scale/appearance change, or a similar nearby object.
+Orange-HSV mode still expects one orange ball, a dark or plain background, fixed camera, even lighting, and little occlusion. It thresholds HSV values from `(5, 100, 100)` through `(25, 255, 255)`, removes small mask noise with 5x5 morphological operations, accepts contour areas from 100 pixels² through 10% of the frame, and rejects center jumps over 50 pixels per elapsed frame.
+
+ROI mode is the manual fallback for other appearances. Select a tight ball box on a clear frame. It uses normalized grayscale template matching at five nearby scales, local motion continuity, size limits, and a confidence gate. It does not fabricate positions during a failed match. It assumes a roughly fixed camera and can still fail under long occlusion, extreme scale/appearance change, or a similar nearby object.
+
+This is automatic processing of uploaded recordings, not real-time camera inference. Forecasts use the existing straight-motion/deceleration model and do not predict bounces or collisions.
 
 If your shell exports a ROS `PYTHONPATH`, prefix the Python and pytest commands with `env -u PYTHONPATH` to keep the virtual environment isolated.
 

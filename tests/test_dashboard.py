@@ -10,7 +10,9 @@ from physicseye.dashboard import (
     MODEL_META,
     load_benchmark,
     prepare_analysis,
+    prepare_automatic_predictions,
     render_annotated_frame,
+    render_comparison_video_bytes,
     render_roi_preview_bytes,
     track_video_bytes,
     validate_video_upload,
@@ -127,3 +129,68 @@ def test_annotated_frame_uses_real_video():
     image = render_annotated_frame(SAMPLE, observations, analysis, 2.25)
     assert image.shape == (240, 320, 3)
     assert image.dtype.name == "uint8"
+
+
+def test_automatic_predictions_are_causal_and_video_is_synchronized(tmp_path):
+    data = open(SAMPLE, "rb").read()
+    observations = track_video_bytes("slowing_down.mp4", data, mode="auto_motion")
+    first = prepare_automatic_predictions(observations, 320)
+    changed = copy.deepcopy(observations)
+    for point in changed[91:]:
+        if point["valid"]:
+            point["x_px"] += 1000
+    second = prepare_automatic_predictions(changed, 320)
+
+    assert first[:91] == second[:91]
+    assert all(
+        item is None or item["cutoff_frame"] <= frame
+        for frame, item in enumerate(first)
+    )
+    video, metadata = render_comparison_video_bytes(
+        "slowing_down.mp4", data, observations, first
+    )
+    assert video
+    output_path = tmp_path / "comparison.mp4"
+    with output_path.open("wb") as stream:
+        stream.write(video)
+    capture = cv2.VideoCapture(str(output_path))
+    try:
+        assert round(capture.get(cv2.CAP_PROP_FRAME_COUNT)) == len(observations)
+        assert round(capture.get(cv2.CAP_PROP_FPS)) == 30
+        assert round(capture.get(cv2.CAP_PROP_FRAME_WIDTH)) == 640
+        assert round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)) == 240
+    finally:
+        capture.release()
+    assert metadata["output_frames"] == len(observations)
+
+
+@pytest.mark.parametrize("size", ((1280, 720), (1920, 1080)))
+def test_automatic_upload_supports_hd_and_bounds_output_resolution(tmp_path, size):
+    video_path = tmp_path / f"input-{size[0]}.avi"
+    writer = cv2.VideoWriter(
+        str(video_path), cv2.VideoWriter_fourcc(*"MJPG"), 20.0, size
+    )
+    assert writer.isOpened()
+    for frame_index in range(20):
+        frame = np.full((size[1], size[0], 3), 24, dtype=np.uint8)
+        center = (
+            round(size[0] * (0.2 + 0.02 * frame_index)),
+            size[1] // 2,
+        )
+        cv2.circle(frame, center, max(14, size[1] // 35), (255, 80, 20), -1)
+        writer.write(frame)
+    writer.release()
+    data = video_path.read_bytes()
+
+    metadata = video_metadata_bytes(video_path.name, data)
+    observations = track_video_bytes(video_path.name, data, mode="auto_motion")
+    timeline = prepare_automatic_predictions(observations, size[0])
+    output, output_metadata = render_comparison_video_bytes(
+        video_path.name, data, observations, timeline
+    )
+    assert metadata["width"] == size[0]
+    assert metadata["height"] == size[1]
+    assert sum(point["valid"] for point in observations) >= 15
+    assert output
+    assert output_metadata["output_width"] == 2560
+    assert output_metadata["output_height"] == 720

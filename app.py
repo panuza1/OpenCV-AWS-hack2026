@@ -1,6 +1,8 @@
-"""PhysicsEye local tracking dashboard with optional direct AWS prediction."""
+"""PhysicsEye uploaded-video tracking dashboard with optional AWS prediction."""
 
+import hashlib
 import sys
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -13,6 +15,8 @@ from physicseye.dashboard import (
     analysis_json,
     load_benchmark,
     prepare_analysis,
+    prepare_automatic_predictions,
+    render_comparison_video_bytes,
     render_roi_preview_bytes,
     render_video_bytes,
     track_video_bytes,
@@ -45,7 +49,7 @@ def _line_chart(rows, x_field, y_field, color_field, y_title):
 
 
 def _video_source():
-    source = st.radio("Video source", ("Sample", "Upload"), horizontal=True)
+    source = st.radio("Video source", ("Upload", "Sample"), horizontal=True)
     if source == "Sample":
         name = st.selectbox("Sample video", tuple(SAMPLES))
         path = SAMPLES[name]
@@ -64,7 +68,10 @@ execution_mode = st.radio("Prediction execution", ("LOCAL", "AWS"), horizontal=T
 if execution_mode == "LOCAL":
     st.info("LOCAL MODE — OpenCV tracking and physics prediction run on this computer.")
 else:
-    st.warning("AWS MODE — OpenCV tracking stays local. Prediction runs only after you explicitly invoke the configured Lambda.")
+    st.warning(
+        "AWS MODE — the automatic comparison remains local. Use Advanced Options "
+        "to explicitly invoke Lambda and verify local/cloud prediction parity."
+    )
 
 benchmark = load_benchmark()
 overview, video_tab, comparison_tab, adaptive_tab, benchmark_tab = st.tabs(
@@ -74,8 +81,8 @@ overview, video_tab, comparison_tab, adaptive_tab, benchmark_tab = st.tabs(
 with overview:
     st.subheader("Measured, causal trajectory forecasting")
     st.write(
-        "Choose a video, track the orange ball with OpenCV 5, select a cutoff, and compare four forecasts. "
-        "Predictions use only observations at or before the cutoff; later points are revealed afterward for evaluation."
+        "Upload a ball-motion video for automatic OpenCV 5 tracking and a synchronized prediction video. "
+        "Every forecast uses only observations available at its displayed cutoff."
     )
     if benchmark["status"] == "ok":
         acceptance = benchmark["data"]["acceptance"]
@@ -83,13 +90,11 @@ with overview:
         st.caption("This acceptance result is synthetic and does not establish real-world adaptive accuracy.")
 
 with video_tab:
-    st.subheader("Analyze a video")
+    st.subheader("Automatic uploaded-video analysis")
+    st.caption("Uploaded files are processed offline; this is not live camera inference.")
     filename, video_bytes = _video_source()
-    tracking_mode = st.radio(
-        "Tracking mode", ("Orange HSV", "Select target ROI"), horizontal=True
-    )
-    tracker_options = {} if tracking_mode == "Orange HSV" else None
-    if filename and tracking_mode == "Select target ROI":
+    metadata = None
+    if filename:
         try:
             metadata = video_metadata_bytes(filename, video_bytes)
             st.caption(
@@ -97,50 +102,121 @@ with video_tab:
                 f'one decoded BGR frame is {metadata["decoded_frame_mib"]:.1f} MiB '
                 '(decoder buffers require additional memory).'
             )
-            initial_frame = st.slider(
-                "Initialization frame", 0, metadata["frame_count"] - 1, 0
-            )
-            x_range = st.slider(
-                "Target horizontal range (px)", 0, metadata["width"],
-                (metadata["width"] // 3, 2 * metadata["width"] // 3),
-            )
-            y_range = st.slider(
-                "Target vertical range (px)", 0, metadata["height"],
-                (metadata["height"] // 3, 2 * metadata["height"] // 3),
-            )
-            roi = (x_range[0], y_range[0], x_range[1] - x_range[0], y_range[1] - y_range[0])
-            st.image(
-                render_roi_preview_bytes(filename, video_bytes, initial_frame, roi),
-                caption=f"Selected target on frame {initial_frame}",
-            )
-            tracker_options = {
-                "mode": "roi_template", "initial_frame": initial_frame, "roi": roi
-            }
-            st.caption("Adjust both ranges until the green box tightly surrounds only the ball.")
         except ValueError as error:
             st.error(str(error))
-    if filename and tracker_options is not None and st.button("Analyze", type="primary"):
+
+    tracker_options = {"mode": "auto_motion"}
+    tracking_mode = "Automatic motion + circle"
+    with st.expander("Advanced Options"):
+        tracking_mode = st.selectbox(
+            "Tracking mode",
+            ("Automatic motion + circle", "Orange HSV", "Select target ROI"),
+        )
+        if tracking_mode == "Orange HSV":
+            tracker_options = {"mode": "hsv"}
+        elif tracking_mode == "Select target ROI":
+            tracker_options = None
+            if metadata is not None:
+                initial_frame = st.slider(
+                    "Initialization frame", 0, metadata["frame_count"] - 1, 0
+                )
+                x_range = st.slider(
+                    "Target horizontal range (px)", 0, metadata["width"],
+                    (metadata["width"] // 3, 2 * metadata["width"] // 3),
+                )
+                y_range = st.slider(
+                    "Target vertical range (px)", 0, metadata["height"],
+                    (metadata["height"] // 3, 2 * metadata["height"] // 3),
+                )
+                roi = (
+                    x_range[0], y_range[0],
+                    x_range[1] - x_range[0], y_range[1] - y_range[0],
+                )
+                st.image(
+                    render_roi_preview_bytes(filename, video_bytes, initial_frame, roi),
+                    caption=f"Selected target on frame {initial_frame}",
+                )
+                tracker_options = {
+                    "mode": "roi_template", "initial_frame": initial_frame, "roi": roi
+                }
+                st.caption("Adjust both ranges until the green box tightly surrounds only the ball.")
+
+        if tracking_mode != "Automatic motion + circle" and st.button(
+            "Analyze with selected fallback"
+        ):
+            if filename and tracker_options is not None:
+                try:
+                    st.session_state.track = track_video_bytes(
+                        filename, video_bytes, **tracker_options
+                    )
+                    st.session_state.input_key = (
+                        hashlib.sha256(video_bytes).hexdigest(), tracking_mode
+                    )
+                    st.session_state.video_name = filename
+                    st.session_state.video_bytes = video_bytes
+                    st.session_state.tracking_mode = tracking_mode
+                    st.session_state.pop("comparison_video", None)
+                    st.session_state.pop("analysis", None)
+                except (ValueError, VideoError, RuntimeError) as error:
+                    st.error(str(error))
+
+    input_key = (
+        (hashlib.sha256(video_bytes).hexdigest(), tracking_mode)
+        if filename else None
+    )
+    if (
+        filename and metadata is not None
+        and tracking_mode == "Automatic motion + circle"
+        and st.session_state.get("input_key") != input_key
+    ):
         try:
-            st.session_state.track = track_video_bytes(
-                filename, video_bytes, **tracker_options
-            )
-            st.session_state.video_name = filename
-            st.session_state.video_bytes = video_bytes
-            st.session_state.tracking_mode = tracking_mode
-            st.session_state.tracking_roi = tracker_options.get("roi")
-            st.session_state.pop("analysis", None)
-            st.session_state.pop("prediction_execution", None)
-            st.session_state.pop("prediction_execution_key", None)
+            with st.spinner("Tracking the ball and encoding the prediction video..."):
+                started = time.perf_counter()
+                observations = track_video_bytes(
+                    filename, video_bytes, mode="auto_motion"
+                )
+                timeline = prepare_automatic_predictions(
+                    observations, metadata["width"]
+                )
+                comparison_video, render_metadata = render_comparison_video_bytes(
+                    filename, video_bytes, observations, timeline
+                )
+                latest = next((item for item in reversed(timeline) if item), None)
+                st.session_state.track = observations
+                st.session_state.automatic_timeline = timeline
+                st.session_state.comparison_video = comparison_video
+                st.session_state.comparison_metadata = render_metadata
+                st.session_state.processing_time_s = time.perf_counter() - started
+                st.session_state.input_key = input_key
+                st.session_state.video_name = filename
+                st.session_state.video_bytes = video_bytes
+                st.session_state.tracking_mode = tracking_mode
+                if latest:
+                    st.session_state.analysis = prepare_analysis(
+                        observations,
+                        latest["cutoff_time_s"],
+                        [row["horizon_s"] for row in latest["prediction"]["models"]["adaptive_deceleration"]["predictions"]],
+                        latest["prediction"],
+                    )
         except (ValueError, VideoError, RuntimeError) as error:
             st.error(str(error))
-    observations = st.session_state.get("track")
+
+    observations = (
+        st.session_state.get("track")
+        if st.session_state.get("input_key") == input_key else None
+    )
     if observations:
         valid_count = sum(point["valid"] for point in observations)
         duration = observations[-1]["time_s"]
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         col1.metric("Frames", len(observations))
-        col2.metric("Valid tracked positions", valid_count)
+        col2.metric("Tracking coverage", f"{100 * valid_count / len(observations):.1f}%")
         col3.metric("Duration", f"{duration:.2f} s")
+        col4.metric(
+            "Processing time",
+            f'{st.session_state.get("processing_time_s", 0.0):.2f} s'
+            if tracking_mode == "Automatic motion + circle" else "manual",
+        )
         confidence_rows = [point for point in observations if point.get("valid") and "confidence" in point]
         if confidence_rows:
             failures = [
@@ -148,16 +224,40 @@ with video_tab:
                 if not point["valid"] and point.get("status") != "before_initialization"
             ]
             st.caption(
-                f'ROI template tracking: mean confidence '
+                f'{tracking_mode}: mean confidence '
                 f'{sum(point["confidence"] for point in confidence_rows) / len(confidence_rows):.3f}; '
                 f'{len(failures)} invalid frames. Invalid frames have no fabricated position.'
             )
             if failures:
                 reasons = sorted({point["status"] for point in failures})
                 st.warning(f'Tracking failures: {", ".join(reasons)}')
+        if tracking_mode == "Automatic motion + circle":
+            timeline = st.session_state.get("automatic_timeline", [])
+            latest = next((item for item in reversed(timeline) if item), None)
+            if latest:
+                direction_cols = st.columns(2)
+                direction_cols[0].metric(
+                    "Latest direction", f'{latest["direction_angle_deg"]:.1f}°'
+                )
+                direction_cols[1].metric(
+                    "Automatic horizon", f'{latest["horizon_s"]:.2f} s'
+                )
+                st.caption("Image coordinates: 0° points right and +90° points down.")
+            if st.session_state.get("comparison_video"):
+                st.video(st.session_state.comparison_video)
+                st.download_button(
+                    "Download side-by-side MP4",
+                    st.session_state.comparison_video,
+                    "physicseye-comparison.mp4",
+                    "video/mp4",
+                )
+                st.caption(
+                    "Left: original. Right: tracked history in gray/green and the adaptive future path in dashed orange."
+                )
         if valid_count < 4:
             st.error("Too few valid tracked positions for physics prediction.")
         else:
+          with st.expander("Advanced prediction controls and AWS parity"):
             cutoff = st.slider("Prediction cutoff (s)", 0.75, max(0.75, duration), min(2.0, duration), 0.05)
             cutoff_observation = min(
                 observations, key=lambda point: abs(point["time_s"] - cutoff)

@@ -163,6 +163,170 @@ def prepare_analysis(observations, cutoff_time_s, horizons_s, prediction_result=
     return analysis
 
 
+def prepare_automatic_predictions(observations, frame_width):
+    """Build a bounded forecast timeline from observation prefixes only."""
+    if len(observations) < 2:
+        return [None] * len(observations)
+    frame_interval_s = observations[1]["time_s"] - observations[0]["time_s"]
+    step = max(1, round(0.25 / frame_interval_s))
+    timeline = []
+    latest = None
+    for index, observation in enumerate(observations):
+        if index % step == 0 and observation["time_s"] >= 0.75:
+            history = observations[:index + 1]
+            probe = predict_trajectory(history, observation["time_s"], [0.25])
+            if probe["status"] == "ok":
+                speed = probe["models"]["adaptive_deceleration"]["parameters"]["speed_px_s"]
+                horizon_s = 0.25 if speed >= 0.5 * frame_width else 0.5
+                horizons = [horizon_s / 3.0, 2.0 * horizon_s / 3.0, horizon_s]
+                prediction = predict_trajectory(history, observation["time_s"], horizons)
+                if prediction["status"] == "ok":
+                    model = prediction["models"]["adaptive_deceleration"]
+                    latest_valid = next(
+                        (point for point in reversed(history) if point.get("valid")),
+                        None,
+                    )
+                    latest = {
+                        "cutoff_frame": index,
+                        "cutoff_time_s": observation["time_s"],
+                        "horizon_s": horizon_s,
+                        "anchor_x_px": latest_valid["x_px"],
+                        "anchor_y_px": latest_valid["y_px"],
+                        "direction_angle_deg": math.degrees(math.atan2(
+                            model["parameters"]["velocity_y_px_s"],
+                            model["parameters"]["velocity_x_px_s"],
+                        )),
+                        "prediction": prediction,
+                    }
+        timeline.append(latest)
+    return timeline
+
+
+def render_comparison_video(video_path, observations, prediction_timeline, output_path):
+    """Encode original and annotated frames side by side without buffering frames."""
+    capture = cv2.VideoCapture(str(video_path))
+    writer = None
+    try:
+        if not capture.isOpened():
+            raise ValueError("Could not open the uploaded video")
+        fps = float(capture.get(cv2.CAP_PROP_FPS))
+        width = round(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        scale = min(1.0, 1280 / width, 720 / height)
+        render_width = max(2, round(width * scale))
+        render_height = max(2, round(height * scale))
+        render_width -= render_width % 2
+        render_height -= render_height % 2
+        writer = cv2.VideoWriter(
+            str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), fps,
+            (render_width * 2, render_height),
+        )
+        if not writer.isOpened():
+            raise ValueError("Could not create the side-by-side MP4")
+
+        history = []
+        frame_index = 0
+        while True:
+            readable, frame = capture.read()
+            if not readable:
+                break
+            original = cv2.resize(frame, (render_width, render_height))
+            annotated = original.copy()
+            observation = observations[frame_index]
+            if observation.get("valid"):
+                center = (
+                    round(observation["x_px"] * scale),
+                    round(observation["y_px"] * scale),
+                )
+                history.append(center)
+                history = history[-30:]
+                if observation.get("bbox"):
+                    x, y, box_width, box_height = observation["bbox"]
+                    first = (round(x * scale), round(y * scale))
+                    second = (
+                        round((x + box_width) * scale),
+                        round((y + box_height) * scale),
+                    )
+                    cv2.rectangle(annotated, first, second, (0, 255, 0), 2)
+                cv2.circle(annotated, center, 5, (0, 255, 0), -1)
+            for first, second in zip(history, history[1:]):
+                cv2.line(annotated, first, second, (210, 210, 210), 2)
+
+            forecast = prediction_timeline[frame_index]
+            if forecast is not None:
+                model = forecast["prediction"]["models"]["adaptive_deceleration"]
+                previous = (
+                    round(forecast["anchor_x_px"] * scale),
+                    round(forecast["anchor_y_px"] * scale),
+                )
+                future_points = [
+                    prediction for prediction in model["predictions"]
+                    if prediction["target_time_s"] > observation["time_s"]
+                ]
+                for prediction in future_points:
+                    target = (
+                        round(prediction["x_px"] * scale),
+                        round(prediction["y_px"] * scale),
+                    )
+                    _draw_dashed_line(annotated, previous, target, (14, 127, 255))
+                    previous = target
+                if future_points:
+                    cv2.arrowedLine(
+                        annotated,
+                        (
+                            round(forecast["anchor_x_px"] * scale),
+                            round(forecast["anchor_y_px"] * scale),
+                        ),
+                        previous,
+                        (14, 127, 255),
+                        2,
+                        cv2.LINE_AA,
+                        tipLength=0.12,
+                    )
+                    cv2.circle(annotated, previous, 7, (14, 127, 255), 2)
+                cv2.putText(
+                    annotated,
+                    f'direction {forecast["direction_angle_deg"]:.1f} deg | horizon {forecast["horizon_s"]:.2f}s',
+                    (12, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                    (14, 127, 255), 2, cv2.LINE_AA,
+                )
+            status = observation.get("status", "tracked" if observation.get("valid") else "invalid")
+            color = (0, 255, 0) if observation.get("valid") else (0, 0, 255)
+            cv2.putText(
+                annotated, f"{frame_index / fps:.2f}s | {status}", (12, 24),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA,
+            )
+            writer.write(cv2.hconcat((original, annotated)))
+            frame_index += 1
+    finally:
+        capture.release()
+        if writer is not None:
+            writer.release()
+    if frame_index != len(observations):
+        raise ValueError("Decoded frame count does not match tracking observations")
+    return {
+        "frames": frame_index,
+        "fps": fps,
+        "width": render_width * 2,
+        "height": render_height,
+    }
+
+
+def render_comparison_video_bytes(filename, data, observations, prediction_timeline):
+    suffix = validate_video_upload(filename, data)
+    with tempfile.TemporaryDirectory() as directory:
+        input_path = Path(directory) / f"input{suffix}"
+        output_path = Path(directory) / "physicseye-comparison.mp4"
+        input_path.write_bytes(data)
+        metadata = _video_metadata(input_path)
+        render_metadata = render_comparison_video(
+            input_path, observations, prediction_timeline, output_path
+        )
+        return output_path.read_bytes(), metadata | {
+            f"output_{key}": value for key, value in render_metadata.items()
+        }
+
+
 def analysis_csv(analysis):
     if not analysis["comparisons"]:
         return ""
@@ -255,6 +419,24 @@ def render_video_bytes(filename, data, observations, analysis, time_s):
         path = Path(directory) / f"video{suffix}"
         path.write_bytes(data)
         return render_annotated_frame(path, observations, analysis, time_s)
+
+
+def _draw_dashed_line(frame, start, end, color, width=2, dash_px=10):
+    distance = math.hypot(end[0] - start[0], end[1] - start[1])
+    if distance <= 0:
+        return
+    for offset in range(0, round(distance), dash_px * 2):
+        first_ratio = offset / distance
+        second_ratio = min((offset + dash_px) / distance, 1.0)
+        first = (
+            round(start[0] + (end[0] - start[0]) * first_ratio),
+            round(start[1] + (end[1] - start[1]) * first_ratio),
+        )
+        second = (
+            round(start[0] + (end[0] - start[0]) * second_ratio),
+            round(start[1] + (end[1] - start[1]) * second_ratio),
+        )
+        cv2.line(frame, first, second, color, width, cv2.LINE_AA)
 
 
 def _point(value):

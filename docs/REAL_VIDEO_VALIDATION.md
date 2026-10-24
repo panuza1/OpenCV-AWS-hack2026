@@ -49,6 +49,22 @@ One CPU trial on a 12th Gen Intel Core i5-12450H took 2.617 s for 197 basketball
 
 These sparse, manually marked frames validate target identity, not subpixel precision. The disco MAE is below its ±25 px annotation uncertainty, so it must not be read as a 3.7 px ground-truth claim.
 
+## Automatic uploaded-video mode
+
+The default dashboard path now requires no ROI. It combines motion foreground, circularity/extent, and three-frame temporal agreement to acquire a candidate, then reuses the appearance/continuity tracker. It processes source frames sequentially at no more than 1280x720 and maps results back to source coordinates. The ROI results above remain the trusted Phase 6 reference and fallback.
+
+| Video | Visible-range coverage | Annotated on-ball | Annotated FP | Center MAE | Tracking time |
+|---|---:|---:|---:|---:|---:|
+| Basketball | 65/67 (97.0%) | 7/7 (100%) | 0/3 | 190.077 px | 4.644 s |
+| Billiards | 316/322 (98.1%) | 11/12 (91.7%) | 0 | 31.011 px | 4.420 s |
+| Disco | 168/171 (98.2%) | 11/12 (91.7%) | 0 | 225.898 px | 4.535 s |
+
+The automatic path identifies the intended object at most annotated instants, but basketball and disco centers are biased by large, changing boxes; high coverage must not be read as accurate center localization. It misses the first billiards and disco annotations because acquisition deliberately waits for three consistent frames. ROI mode remains preferable when precise sparse validation matters.
+
+Automatic observations were also passed through the same strict walk-forward evaluator. Adaptive MAE was 188.776 px for basketball (`n=4`, 0.4 s), 838.801 px for billiards (`n=10`, 1.16–1.20 s), and 233.885 px for disco (`n=9`, 0.60–0.64 s). Adaptive improved over frozen by 1.145% and 35.300% on basketball and billiards, but regressed 0.485% on disco. The center error, hand relaunches, sparse annotations, and perspective prevent a physical-accuracy claim.
+
+Generated exact-center fixtures provide a separate controlled check: automatic tracking covers 147/150 frames (98%) with 1.414 px center MAE on both videos. The automatically selected adaptive endpoint has MAE/RMSE of 1.332/1.346 px on constant motion and 1.750/1.904 px on slowing motion (`n=13` each).
+
 ## Strict walk-forward physics results
 
 At each annotated cutoff, only tracker observations at or before the cutoff were passed to all four models. The next manual annotation was revealed only after prediction. The JSON export includes prediction rows and causal audits showing history and adaptive-update times did not exceed each cutoff.

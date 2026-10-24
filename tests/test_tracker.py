@@ -1,5 +1,6 @@
 import csv
 import json
+import math
 import subprocess
 import sys
 
@@ -154,4 +155,37 @@ def test_roi_template_tracks_selected_target_and_marks_occlusion_invalid(tmp_pat
     assert observations[22]["status"] == "tracked"
     assert observations[22]["confidence"] >= 0.5
     assert all(path.is_file() for path in tracker.write_track(observations, tmp_path / "roi"))
+
+
+def test_automatic_tracker_acquires_a_non_orange_ball_without_filling_gaps(tmp_path):
+    video = tmp_path / "blue_ball.avi"
+    writer = cv2.VideoWriter(
+        str(video), cv2.VideoWriter_fourcc(*"MJPG"), 20.0, (320, 240)
+    )
+    assert writer.isOpened()
+    expected = []
+    for frame_index in range(30):
+        frame = np.full((240, 320, 3), 24, dtype=np.uint8)
+        center = (45 + 4 * frame_index, 120)
+        if not 15 <= frame_index <= 17:
+            cv2.circle(frame, center, 14, (255, 80, 20), -1)
+            expected.append((frame_index, center))
+        writer.write(frame)
+    writer.release()
+
+    observations = track_video(video, mode="auto_motion")
+    assert all(not observations[index]["valid"] for index in range(15, 18))
+    errors = [
+        math.hypot(
+            observations[index]["x_px"] - center[0],
+            observations[index]["y_px"] - center[1],
+        )
+        for index, center in expected
+        if observations[index]["valid"]
+    ]
+    assert len(errors) >= 22
+    assert sum(errors) / len(errors) <= 5.0
+    assert all(
+        "confidence" in point and "status" in point for point in observations
+    )
 

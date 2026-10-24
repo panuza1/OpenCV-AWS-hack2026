@@ -1,4 +1,4 @@
-"""HSV and user-initialized ROI tracking for one ball in fixed-camera video."""
+"""Automatic, HSV, and user-initialized tracking for one ball in fixed-camera video."""
 
 import csv
 import json
@@ -18,6 +18,11 @@ ROI_CONFIDENCE_THRESHOLD = 0.55
 ROI_TEMPLATE_UPDATE_THRESHOLD = 0.7
 ROI_SCALES = (0.88, 0.94, 1.0, 1.06, 1.12)
 ROI_MAX_TRACKING_DIMENSION = 960
+AUTO_MAX_WORKING_WIDTH = 1280
+AUTO_MAX_WORKING_HEIGHT = 720
+AUTO_ACQUIRE_FRAMES = 3
+AUTO_MIN_CONFIDENCE = 0.48
+AUTO_TRACK_CONFIDENCE = 0.50
 _KERNEL = np.ones((5, 5), dtype=np.uint8)
 FIELDS = ("frame", "time_s", "x_px", "y_px", "area_px2", "valid")
 
@@ -43,6 +48,147 @@ def _detect_ball(frame):
                     (moments["m10"] / moments["m00"], moments["m01"] / moments["m00"], area)
                 )
     return max(candidates, key=lambda candidate: candidate[2], default=None)
+
+
+def _automatic_candidates(frame, previous_gray, subtractor):
+    gray = _gray(frame)
+    foreground = subtractor.apply(gray, learningRate=0.02)
+    difference = (
+        cv2.absdiff(gray, previous_gray)
+        if previous_gray is not None else np.zeros_like(gray)
+    )
+    _, difference = cv2.threshold(difference, 12, 255, cv2.THRESH_BINARY)
+    foreground = cv2.bitwise_and(foreground, cv2.dilate(difference, _KERNEL))
+    foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    foreground = cv2.morphologyEx(foreground, cv2.MORPH_CLOSE, _KERNEL)
+    hough_image = cv2.GaussianBlur(gray, (7, 7), 1.5)
+    max_radius = max(8, min(frame.shape[:2]) // 3)
+    circles = None
+    for threshold in (70, 40):
+        circles = cv2.HoughCircles(
+            hough_image,
+            cv2.HOUGH_GRADIENT,
+            dp=2,
+            minDist=20,
+            param1=120,
+            param2=threshold,
+            minRadius=5,
+            maxRadius=max_radius,
+        )
+        if circles is not None:
+            break
+    circle_candidates = []
+    if circles is not None:
+        for center_x, center_y, radius in circles[0]:
+            left = max(0, round(center_x - radius))
+            top = max(0, round(center_y - radius))
+            right = min(frame.shape[1], round(center_x + radius + 1))
+            bottom = min(frame.shape[0], round(center_y + radius + 1))
+            local_mask = np.zeros((bottom - top, right - left), dtype=np.uint8)
+            cv2.circle(
+                local_mask,
+                (round(center_x) - left, round(center_y) - top),
+                round(radius),
+                255,
+                -1,
+            )
+            motion = cv2.countNonZero(
+                cv2.bitwise_and(difference[top:bottom, left:right], local_mask)
+            ) / max(1, cv2.countNonZero(local_mask))
+            if motion < 0.01:
+                continue
+            padding = max(3, round(radius * 0.12))
+            box_left = max(0, round(center_x - radius - padding))
+            box_top = max(0, round(center_y - radius - padding))
+            box_right = min(frame.shape[1], round(center_x + radius + padding))
+            box_bottom = min(frame.shape[0], round(center_y + radius + padding))
+            circle_candidates.append({
+                "bbox": (
+                    box_left, box_top,
+                    box_right - box_left, box_bottom - box_top,
+                ),
+                "center": (float(center_x), float(center_y)),
+                "area": math.pi * float(radius) ** 2,
+                "confidence": min(1.0, 0.55 + 0.45 * motion),
+                "rank": motion + min(float(radius), 200.0) / 500.0,
+            })
+    if circle_candidates:
+        return sorted(
+            circle_candidates, key=lambda item: item["rank"], reverse=True
+        ), gray
+
+    contours, _ = cv2.findContours(
+        foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+    frame_area = frame.shape[0] * frame.shape[1]
+    candidates = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if not max(20.0, frame_area * 0.00003) <= area <= frame_area * 0.16:
+            continue
+        perimeter = cv2.arcLength(contour, True)
+        if perimeter <= 0:
+            continue
+        x, y, width, height = cv2.boundingRect(contour)
+        if min(width, height) < 6 or x <= 1 or y <= 1:
+            continue
+        if x + width >= frame.shape[1] - 1 or y + height >= frame.shape[0] - 1:
+            continue
+        circularity = min(1.0, 4.0 * math.pi * area / perimeter**2)
+        aspect = min(width, height) / max(width, height)
+        extent = min(1.0, area / (width * height))
+        confidence = 0.45 * circularity + 0.35 * aspect + 0.20 * extent
+        if circularity < 0.25 or aspect < 0.45 or confidence < AUTO_MIN_CONFIDENCE:
+            continue
+        padding = max(3, round(0.12 * max(width, height)))
+        left = max(0, x - padding)
+        top = max(0, y - padding)
+        right = min(frame.shape[1], x + width + padding)
+        bottom = min(frame.shape[0], y + height + padding)
+        candidates.append({
+            "bbox": (left, top, right - left, bottom - top),
+            "center": (x + width / 2.0, y + height / 2.0),
+            "area": area,
+            "confidence": confidence,
+            "rank": confidence,
+        })
+    return sorted(candidates, key=lambda item: item["rank"], reverse=True), gray
+
+
+def _update_automatic_acquisition(state, candidates, frame_index):
+    tentative = state.get("tentative")
+    if tentative is None:
+        if candidates:
+            state["tentative"] = dict(candidates[0], count=1, first_frame=frame_index)
+        return None
+
+    center = tentative["center"]
+    radius = max(45.0, 2.5 * math.sqrt(tentative["area"]))
+    matches = [
+        candidate for candidate in candidates
+        if math.hypot(candidate["center"][0] - center[0], candidate["center"][1] - center[1]) <= radius
+        and 0.35 <= candidate["area"] / tentative["area"] <= 2.8
+    ]
+    if not matches:
+        state["tentative"] = (
+            dict(candidates[0], count=1, first_frame=frame_index)
+            if candidates else None
+        )
+        return None
+
+    match = min(
+        matches,
+        key=lambda item: math.hypot(
+            item["center"][0] - center[0], item["center"][1] - center[1]
+        ) - 20.0 * item["confidence"],
+    )
+    match = dict(
+        match,
+        count=tentative["count"] + 1,
+        first_frame=tentative["first_frame"],
+    )
+    state["tentative"] = match
+    return match if match["count"] >= AUTO_ACQUIRE_FRAMES else None
 
 
 def _video_fps(capture, fps_override):
@@ -238,7 +384,7 @@ def track_video(
     if not cv2.__version__.startswith("5."):
         raise RuntimeError(f"PhysicsEye requires OpenCV 5, found {cv2.__version__}")
 
-    if mode not in ("hsv", "roi_template"):
+    if mode not in ("auto_motion", "hsv", "roi_template"):
         raise VideoError(f"Unknown tracking mode: {mode}")
     if mode == "roi_template":
         if not isinstance(initial_frame, int) or isinstance(initial_frame, bool) or initial_frame < 0:
@@ -256,11 +402,115 @@ def track_video(
         observations = []
         last_valid = None
         roi_state = {"initial_frame": initial_frame, "roi": roi}
+        automatic_state = {
+            "subtractor": cv2.createBackgroundSubtractorMOG2(
+                history=60, varThreshold=24, detectShadows=False
+            ),
+            "previous_gray": None,
+            "tentative": None,
+            "roi_state": None,
+        }
         frame_index = 0
         while True:
             readable, frame = capture.read()
             if not readable:
                 break
+            if mode == "auto_motion":
+                if "working_scale" not in automatic_state:
+                    working_scale = min(
+                        1.0,
+                        AUTO_MAX_WORKING_WIDTH / frame.shape[1],
+                        AUTO_MAX_WORKING_HEIGHT / frame.shape[0],
+                    )
+                    automatic_state["working_scale"] = working_scale
+                    automatic_state["coordinate_scale"] = 1.0 / working_scale
+                working_scale = automatic_state["working_scale"]
+                working_frame = (
+                    cv2.resize(frame, None, fx=working_scale, fy=working_scale)
+                    if working_scale < 1.0 else frame
+                )
+                auto_roi_state = automatic_state["roi_state"]
+                if auto_roi_state is None:
+                    candidates, gray = _automatic_candidates(
+                        working_frame,
+                        automatic_state["previous_gray"],
+                        automatic_state["subtractor"],
+                    )
+                    automatic_state["previous_gray"] = gray
+                    acquired = _update_automatic_acquisition(
+                        automatic_state, candidates, frame_index
+                    )
+                    if acquired is None:
+                        observations.append(
+                            _invalid_roi_observation(
+                                frame_index, fps, "searching_for_moving_ball"
+                            )
+                        )
+                    else:
+                        auto_roi_state = {
+                            "initial_frame": frame_index,
+                            "roi": acquired["bbox"],
+                            "coordinate_scale": automatic_state["coordinate_scale"],
+                        }
+                        automatic_state["roi_state"] = auto_roi_state
+                        automatic_state["tentative"] = None
+                        observation = _track_roi_frame(
+                            working_frame,
+                            frame_index,
+                            fps,
+                            auto_roi_state,
+                            AUTO_TRACK_CONFIDENCE,
+                        )
+                        observation["confidence"] = acquired["confidence"]
+                        observation["status"] = "auto_initialized"
+                        observations.append(observation)
+                else:
+                    observation = (
+                        _invalid_roi_observation(
+                            frame_index, fps, "reacquiring_moving_ball"
+                        )
+                        if auto_roi_state.get("missed_frames", 0) >= AUTO_ACQUIRE_FRAMES
+                        else _track_roi_frame(
+                            working_frame,
+                            frame_index,
+                            fps,
+                            auto_roi_state,
+                            AUTO_TRACK_CONFIDENCE,
+                        )
+                    )
+                    if observation["valid"]:
+                        automatic_state["previous_gray"] = _gray(working_frame)
+                        automatic_state["tentative"] = None
+                    else:
+                        candidates, gray = _automatic_candidates(
+                            working_frame,
+                            automatic_state["previous_gray"],
+                            automatic_state["subtractor"],
+                        )
+                        automatic_state["previous_gray"] = gray
+                        reacquired = _update_automatic_acquisition(
+                            automatic_state, candidates, frame_index
+                        )
+                        if reacquired is not None:
+                            auto_roi_state = {
+                                "initial_frame": frame_index,
+                                "roi": reacquired["bbox"],
+                                "coordinate_scale": automatic_state["coordinate_scale"],
+                            }
+                            automatic_state["roi_state"] = auto_roi_state
+                            automatic_state["tentative"] = None
+                            observation = _track_roi_frame(
+                                working_frame,
+                                frame_index,
+                                fps,
+                                auto_roi_state,
+                                AUTO_TRACK_CONFIDENCE,
+                            )
+                            observation["confidence"] = reacquired["confidence"]
+                            observation["status"] = "auto_reacquired"
+                    observations.append(observation)
+                frame_index += 1
+                continue
             if mode == "roi_template":
                 if "working_scale" not in roi_state:
                     working_scale = min(

@@ -8,9 +8,15 @@ from physicseye.tracker import track_video
 
 
 CONFIGURATIONS = {
-    "basketball_6077402": {"initial_frame": 80, "roi": (1175, 120, 430, 430), "max_mae": 35.0},
-    "billiards_6254504": {"initial_frame": 0, "roi": (776, 1539, 240, 240), "max_mae": 40.0},
-    "disco_5751090": {"initial_frame": 0, "roi": (1880, 500, 1150, 1150), "max_mae": 30.0},
+    "basketball_6077402": {
+        "initial_frame": 80, "roi": (1175, 120, 430, 430), "max_mae": 35.0,
+    },
+    "billiards_6254504": {
+        "initial_frame": 0, "roi": (776, 1539, 240, 240), "max_mae": 40.0,
+    },
+    "disco_5751090": {
+        "initial_frame": 0, "roi": (1880, 500, 1150, 1150), "max_mae": 30.0,
+    },
 }
 
 
@@ -49,3 +55,37 @@ def test_roi_tracker_matches_real_video_annotations(name):
 
     assert false_positives == 0
     assert sum(errors) / len(errors) <= configuration["max_mae"]
+
+
+@pytest.mark.parametrize("name", CONFIGURATIONS)
+def test_automatic_tracker_selects_the_annotated_ball(name):
+    video = Path(f"examples/real/{name}.mp4")
+    if not video.is_file():
+        pytest.skip("licensed real-video fixture is downloaded separately")
+    observations = track_video(video, mode="auto_motion")
+
+    visible_count = 0
+    on_ball = 0
+    false_positives = 0
+    errors = []
+    radii = []
+    for annotation in _annotations(name):
+        observation = observations[int(annotation["frame"])]
+        if annotation["ball_visible"] == "false":
+            false_positives += int(observation["valid"])
+            continue
+        visible_count += 1
+        if not observation["valid"]:
+            continue
+        error = math.hypot(
+            observation["x_px"] - float(annotation["x_px"]),
+            observation["y_px"] - float(annotation["y_px"]),
+        )
+        errors.append(error)
+        radius = float(annotation["radius_px"])
+        radii.append(radius)
+        on_ball += error <= radius
+
+    assert false_positives == 0
+    assert on_ball / visible_count >= 0.9
+    assert sum(errors) / len(errors) <= sum(radii) / len(radii)

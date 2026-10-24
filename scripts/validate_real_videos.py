@@ -163,7 +163,10 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, default=Path("outputs/real_roi_validation.json"))
     args = parser.parse_args(argv)
     annotations = _read_annotations(args.annotations)
-    result = {"tracking": {}, "physics": {}}
+    result = {
+        "tracking": {}, "physics": {},
+        "automatic_tracking": {}, "automatic_physics": {},
+    }
     passing_videos = 0
     for name, configuration in CONFIGURATIONS.items():
         video = args.video_dir / f"{name}.mp4"
@@ -179,6 +182,18 @@ def main(argv=None):
             observations, annotations[name], configuration["visible_frames"], latency_ms
         )
         result["physics"][name] = _walk_forward(observations, annotations[name])
+        automatic_started = time.perf_counter()
+        automatic_observations = track_video(video, mode="auto_motion")
+        automatic_latency_ms = (time.perf_counter() - automatic_started) * 1000.0
+        result["automatic_tracking"][name] = _tracking_metrics(
+            automatic_observations,
+            annotations[name],
+            configuration["visible_frames"],
+            automatic_latency_ms,
+        )
+        result["automatic_physics"][name] = _walk_forward(
+            automatic_observations, annotations[name]
+        )
         tracking = result["tracking"][name]
         if (
             tracking["on_ball_rate_pct"] >= 90.0
@@ -210,6 +225,22 @@ def main(argv=None):
                 "adaptive_gain_vs_frozen_pct": row["adaptive_gain_vs_frozen_pct"],
                 "summaries": row["summaries"],
             } for name, row in result["physics"].items()
+        },
+        "automatic_tracking": {
+            name: {
+                "coverage_pct": row["valid_visible_coverage_pct"],
+                "on_ball_rate_pct": row["on_ball_rate_pct"],
+                "center_mae_px": row["center_error"]["mae_px"],
+                "false_positives": row["annotated_false_positives"],
+                "latency_ms": row["tracking_latency_ms"],
+            } for name, row in result["automatic_tracking"].items()
+        },
+        "automatic_physics": {
+            name: {
+                "horizons_s": row["horizons_s"],
+                "adaptive_gain_vs_frozen_pct": row["adaptive_gain_vs_frozen_pct"],
+                "summaries": row["summaries"],
+            } for name, row in result["automatic_physics"].items()
         },
         "output": str(args.output),
     }, indent=2, allow_nan=False))

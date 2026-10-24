@@ -6,6 +6,8 @@
 
 The repository, technical report, architecture, reproducibility instructions, evaluation evidence, official-requirements checklist, and timed demo script are ready. Final local and real AWS verification pass. Phase 7 cannot satisfy its final acceptance gate until the entrant records and verifies a <=5-minute judge-accessible video, confirms repository access/live screen-share details, submits through Devpost, and verifies the resulting project URL.
 
+The post-release automatic-video upgrade was verified on 2026-10-24. Uploaded recordings now default to automatic tracking, causal prediction, and a downloadable synchronized comparison video; Phase 7's manual submission blocker is unchanged.
+
 ## Completed tasks
 
 - Inspected the initial repository (`MASTER_PLAN.md` and the unrelated `note.pd`).
@@ -69,6 +71,10 @@ The repository, technical report, architecture, reproducibility instructions, ev
 - Added a 4:50 `docs/DEMO_SCRIPT.md` with exact preflight commands, dashboard actions, narration, AWS proof, timing, privacy checks, and post-render verification.
 - Finalized the README with the project pitch, architecture, headline measurements, documentation map, AWS summary, and honest submission status.
 - Re-ran the full suite, dependency check, both synthetic tracker flows, seven-scenario benchmark, three-video real validation, Streamlit startup/health smoke test, and a real Lambda parity invocation without changing thresholds.
+- Added color-independent motion/circle candidate detection with temporal, size, appearance, confidence, and jump checks; the existing template tracker handles continuity and explicit invalid observations.
+- Added automatic causal cutoff/horizon selection and sequential 1280x720 side-by-side encoding with history, dashed adaptive forecast, endpoint, direction arrow, angle, timestamps, and status.
+- Made upload + automatic analysis the default dashboard path while retaining HSV, manual ROI, explicit model controls, benchmark views, and AWS parity under Advanced Options.
+- Added automatic-tracker, causality, video synchronization, 720p/1080p, and annotated real-video regression coverage without changing dependencies or the physics engine.
 
 ## Verified environment
 
@@ -385,19 +391,54 @@ Schema mismatches: 0
 Result: PASS
 ```
 
+Automatic uploaded-video upgrade verification:
+
+```text
+Generated constant-speed: 147/150 valid (98%); center MAE 1.414 px;
+  automatic endpoint MAE/RMSE 1.332/1.346 px (n=13)
+Generated slowing-down: 147/150 valid (98%); center MAE 1.414 px;
+  automatic endpoint MAE/RMSE 1.750/1.904 px (n=13)
+
+Annotated automatic tracking:
+basketball: on-ball 7/7; annotated FP 0/3; center MAE 190.077 px
+billiards: on-ball 11/12; annotated FP 0; center MAE 31.011 px
+disco: on-ball 11/12; annotated FP 0; center MAE 225.898 px
+
+720p basketball derivative: 197 frames; 4.450 s; peak RSS 235180 KiB
+1080p basketball derivative: 197 frames; 4.951 s; peak RSS 290820 KiB
+512 MB clean Linux container, 1080p: PASS; 197 frames; 5.684 s
+
+$ env -u PYTHONPATH .venv/bin/python -m pytest -q
+54 passed in 28.55s
+$ env -u PYTHONPATH .venv/bin/python -m pip check
+No broken requirements found.
+$ env -u PYTHONPATH .venv/bin/streamlit run app.py --server.headless true --server.port 8507
+$ curl --fail http://localhost:8507/_stcore/health
+ok
+
+Real AWS slowing-video invocation:
+AWS request ID: 70c13b85-0882-41de-a12b-6d3650bb1bea
+Invocation / Lambda duration: 477.097 ms / 39.49 ms
+Local latency / maximum parity difference: 0.443 ms / 1.004e-13
+Parity tolerance / result: 1e-9 / PASS
+```
+
+Automatic real-video prediction remained mixed. Against the sparse later manual points, adaptive MAE was `188.776 px` (`n=4`, 0.4 s) for basketball, `838.801 px` (`n=10`, 1.16–1.20 s) for billiards, and `233.885 px` (`n=9`, 0.60–0.64 s) for disco. The billiards sequence contains hand relaunches; disco adaptive prediction was 0.485% worse than frozen; the large basketball/disco tracker-center errors preclude strong physics claims.
+
 ## Known issues
 
 - This host exports a ROS `PYTHONPATH`, which exposes unrelated ROS packages even inside a normal virtual environment. Verification commands used `env -u PYTHONPATH`; the README documents this host-specific workaround.
 - Codec support depends on the OpenCV build and host. The generator validates `mp4v` and falls back to `MJPG`/AVI rather than assuming either works.
 - Generated videos and CSVs are reproducible local artifacts under `examples/generated/` and are intentionally Git-ignored.
-- HSV thresholds target one orange ball on a plain dark background. ROI mode handles the three validation targets but assumes a fixed camera and recognizable appearance; long occlusion, extreme scale change, or a similar nearby object can still produce invalid or incorrect detections.
+- Automatic mode assumes a distinct moving ball and a fixed or slowly moving camera. Camera motion, reflections, cuts, long occlusion, extreme scale change, or a similar moving circular object can still produce invalid or incorrect detections. HSV and ROI remain explicit fallbacks.
 - Video time uses `frame / fps`; variable-frame-rate media may require transcoding or an explicit trustworthy FPS override.
 - Physics estimates assume approximately straight, direction-stable motion in image space. They do not model turns, collisions, perspective, or calibrated physical units.
 - Adaptive feedback uses the first valid observation at/after its 0.25-second target, up to 0.125 seconds late; a later target is logged and skipped.
 - The required adaptive threshold passes only on the designated noiseless abrupt-change scenario; noisy and tracker scenarios include losses and do not support a universal-improvement claim.
 - OpenCV benchmark fixtures are generated videos, not independently recorded real motion. Their tracking MAE is `0.035545 px` for constant speed and `0.032061 px` for slowing motion.
 - Ground-truth targets falling between video frames are linearly interpolated. Latency is host-dependent and excluded from deterministic assertions.
-- The dashboard accepts prerecorded uploads only; Phase 4 deliberately excludes webcam streaming.
+- The dashboard automatically processes prerecorded uploads; it does not provide real-time camera inference.
+- Uploaded frames above 2.1 megapixels are rejected before decoding. Tested 720p and 1080p inputs are processed at no more than 1280x720; 4K requires prior conversion.
 - The three independently sourced real clips remain Git-ignored under `examples/real/` because they total about 63 MB and the Pexels license restricts standalone redistribution. Reproduction uses the official source links and downloads documented in `docs/REAL_VIDEO_VALIDATION.md`.
 - The 31 visible and three absent manual reference rows validate target identity only at sparse frames. Annotation uncertainty is ±8–25 px; the disco model differences are below that uncertainty.
 - Basketball perspective creates apparent acceleration, billiards hands repeatedly redirect the ball, and disco reflections/near-stationarity violate or weaken the simple deceleration model. The real results do not establish calibrated physical parameters or universal adaptive benefit.
